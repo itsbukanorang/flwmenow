@@ -1,6 +1,7 @@
 mod auth;
 mod ceo;
 mod companies;
+mod executive;
 mod security;
 
 use std::{sync::Arc, time::Duration};
@@ -52,6 +53,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/ceo/chat", post(ceo::chat))
         .route("/api/ceo/history", get(ceo::history))
         .route("/api/ceo/clear", post(ceo::clear_history))
+        .route("/api/executives/cto/run", post(executive::run_cto))
         .layer(axum::extract::DefaultBodyLimit::max(65_536))
         .with_state(AppState {
             db: Arc::new(db),
