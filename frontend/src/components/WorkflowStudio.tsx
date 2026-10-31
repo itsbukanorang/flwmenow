@@ -17,6 +17,7 @@ import {
   Plus,
   RotateCcw,
   Send,
+  Trash2,
   Users,
   X,
 } from 'lucide-react'
@@ -40,6 +41,18 @@ type TalkMessage = {
   id: number
   role: 'user' | 'ceo'
   text: string
+}
+
+type CeoHistoryMessage = {
+  id: number
+  role: 'user' | 'assistant'
+  text: string
+  created_at: string
+}
+
+type CeoHistoryResponse = {
+  messages?: CeoHistoryMessage[]
+  error?: string
 }
 
 type TalkView = 'normal' | 'maximized' | 'minimized'
@@ -276,8 +289,17 @@ export default function WorkflowStudio({
   const [talkBusy, setTalkBusy] =
     useState(false)
 
+  const [talkClearing, setTalkClearing] =
+    useState(false)
+
   const [talkMessages, setTalkMessages] =
     useState<TalkMessage[]>([])
+
+  const [talkMessageTimes, setTalkMessageTimes] =
+    useState<Record<number, number>>({})
+
+  const [talkElapsedMs, setTalkElapsedMs] =
+    useState(0)
 
   const [talkView, setTalkView] =
     useState<TalkView>('normal')
@@ -298,6 +320,8 @@ export default function WorkflowStudio({
     useState<Partial<Record<ExecutiveRole, Point>>>({})
 
   useEffect(() => {
+    let active = true
+
     setExecutiveRoles(loadRoles(company?.id))
     setWorkers([])
     setManageExecutivesOpen(false)
@@ -305,7 +329,10 @@ export default function WorkflowStudio({
     setTalkText('')
     setTalkNotice('')
     setTalkBusy(false)
+    setTalkClearing(false)
     setTalkMessages([])
+    setTalkMessageTimes({})
+    setTalkElapsedMs(0)
     setTalkView('normal')
 
     try {
@@ -316,6 +343,88 @@ export default function WorkflowStudio({
 
     speechRef.current = null
     setVoiceListening(false)
+
+    if (company) {
+      fetch(
+        `/api/ceo/history?company_id=${company.id}`,
+        {
+          method: 'GET',
+          credentials: 'same-origin',
+          cache: 'no-store',
+        },
+      )
+        .then(async (response) => {
+          const data =
+            (await response.json()) as CeoHistoryResponse
+
+          if (!response.ok) {
+            throw new Error(
+              data.error ||
+              'Unable to load chat history',
+            )
+          }
+
+          return data
+        })
+        .then((data) => {
+          if (!active) return
+
+          const historyMessages =
+            (data.messages ?? []) as Array<{
+              id: number
+              role: 'user' | 'assistant'
+              text: string
+              created_at_ms?: number
+            }>
+
+          const historyTimes:
+            Record<number, number> = {}
+
+          for (const item of historyMessages) {
+            historyTimes[item.id] =
+              Number(
+                item.created_at_ms ??
+                Date.now(),
+              )
+          }
+
+          setTalkMessageTimes(
+            historyTimes,
+          )
+
+          setTalkMessages(
+            historyMessages.map(
+              (item) => ({
+                id: item.id,
+                role:
+                  item.role === 'assistant'
+                    ? 'ceo'
+                    : 'user',
+                text: item.text,
+              }),
+            ),
+          )
+        })
+        .catch((error) => {
+          if (!active) return
+
+          setTalkNotice(
+            error instanceof Error
+              ? error.message
+              : 'Unable to load chat history',
+          )
+        })
+    }
+
+    return () => {
+      active = false
+
+      try {
+        speechRef.current?.stop()
+      } catch {
+        // recognition may already be stopped
+      }
+    }
   }, [company?.id])
 
   useEffect(() => {
@@ -603,10 +712,101 @@ export default function WorkflowStudio({
     }
   }
 
+  const clearTalkHistory = async () => {
+    if (
+      !company ||
+      talkBusy ||
+      talkClearing
+    ) {
+      return
+    }
+
+    setTalkClearing(true)
+    setTalkNotice('')
+
+    try {
+      const response =
+        await fetch(
+          '/api/ceo/clear',
+          {
+            method: 'POST',
+            credentials:
+              'same-origin',
+            headers: {
+              'Content-Type':
+                'application/json',
+            },
+            body:
+              JSON.stringify({
+                company_id:
+                  company.id,
+              }),
+          },
+        )
+
+      const data =
+        (await response.json()) as {
+          ok?: boolean
+          error?: string
+        }
+
+      if (!response.ok) {
+        throw new Error(
+          data.error ||
+          'Unable to clear chat history',
+        )
+      }
+
+      setTalkMessages([])
+      setTalkMessageTimes({})
+    } catch (error) {
+      setTalkNotice(
+        error instanceof Error
+          ? error.message
+          : 'Unable to clear chat history',
+      )
+    } finally {
+      setTalkClearing(false)
+    }
+  }
+
+  // FLWME CEO TALK ELAPSED TIMER
+  useEffect(() => {
+    if (!talkBusy) {
+      setTalkElapsedMs(0)
+      return
+    }
+
+    const startedAt = Date.now()
+
+    const updateElapsed = () => {
+      setTalkElapsedMs(
+        Date.now() - startedAt,
+      )
+    }
+
+    updateElapsed()
+
+    const timer =
+      window.setInterval(
+        updateElapsed,
+        100,
+      )
+
+    return () => {
+      window.clearInterval(timer)
+    }
+  }, [talkBusy])
+
   const sendTalk = async () => {
     const message = talkText.trim()
 
-    if (!message || !company || talkBusy) return
+    if (
+      !message ||
+      !company ||
+      talkBusy ||
+      talkClearing
+    ) return
 
     if (attachments.length > 0) {
       setTalkNotice(
@@ -617,11 +817,23 @@ export default function WorkflowStudio({
 
     setTalkBusy(true)
     setTalkNotice('')
+    setTalkElapsedMs(0)
+
+    const userMessageId =
+      Date.now()
+
+    setTalkMessageTimes(
+      (current) => ({
+        ...current,
+        [userMessageId]:
+          userMessageId,
+      }),
+    )
 
     setTalkMessages((current) => [
       ...current,
       {
-        id: Date.now(),
+        id: userMessageId,
         role: 'user',
         text: message,
       },
@@ -664,10 +876,24 @@ export default function WorkflowStudio({
         )
       }
 
+      const ceoMessageId =
+        Math.max(
+          Date.now(),
+          userMessageId + 1,
+        )
+
+      setTalkMessageTimes(
+        (current) => ({
+          ...current,
+          [ceoMessageId]:
+            ceoMessageId,
+        }),
+      )
+
       setTalkMessages((current) => [
         ...current,
         {
-          id: Date.now() + 1,
+          id: ceoMessageId,
           role: 'ceo',
           text: reply,
         },
@@ -1290,6 +1516,24 @@ export default function WorkflowStudio({
               </div>
 
               <div className="studio-talk-window-controls">
+                {talkMessages.length > 0 &&
+                  talkView !== 'minimized' && (
+                    <button
+                      type="button"
+                      title="Clear chat history — memory stays"
+                      aria-label="Clear chat history"
+                      disabled={
+                        talkBusy ||
+                        talkClearing
+                      }
+                      onClick={() => {
+                        void clearTalkHistory()
+                      }}
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  )}
+
                 {talkView === 'minimized' ? (
                   <button
                     type="button"
@@ -1373,7 +1617,38 @@ export default function WorkflowStudio({
                         : 'studio-talk-bubble studio-talk-bubble-ceo'
                     }
                   >
-                    {item.text}
+                    <span className="studio-talk-message-text">
+                      {item.text}
+                    </span>
+
+                    {talkMessageTimes[item.id] && (
+                      <time
+                        className="studio-talk-time"
+                        dateTime={
+                          new Date(
+                            talkMessageTimes[
+                              item.id
+                            ],
+                          ).toISOString()
+                        }
+                      >
+                        {
+                          new Date(
+                            talkMessageTimes[
+                              item.id
+                            ],
+                          ).toLocaleTimeString(
+                            [],
+                            {
+                              hour:
+                                '2-digit',
+                              minute:
+                                '2-digit',
+                            },
+                          )
+                        }
+                      </time>
+                    )}
                   </div>
                 </div>
               ))}
@@ -1381,7 +1656,24 @@ export default function WorkflowStudio({
               {talkBusy && (
                 <div className="studio-talk-row studio-talk-row-ceo">
                   <div className="studio-talk-bubble studio-talk-bubble-ceo studio-talk-bubble-thinking">
-                    CEO is thinking…
+                    <span className="studio-talk-thinking-status">
+                      {
+                        talkElapsedMs < 1800
+                          ? 'Thinking'
+                          : talkElapsedMs < 4200
+                            ? 'Working'
+                            : 'Composing'
+                      }
+                    </span>
+
+                    <span className="studio-talk-thinking-time">
+                      {
+                        (
+                          talkElapsedMs /
+                          1000
+                        ).toFixed(1)
+                      }s
+                    </span>
                   </div>
                 </div>
               )}
@@ -1506,6 +1798,7 @@ export default function WorkflowStudio({
                 className="studio-talk-send"
                 disabled={
                   talkBusy ||
+                  talkClearing ||
                   !talkText.trim()
                 }
                 onClick={sendTalk}

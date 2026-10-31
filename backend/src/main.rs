@@ -50,6 +50,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             put(companies::update).delete(companies::remove),
         )
         .route("/api/ceo/chat", post(ceo::chat))
+        .route("/api/ceo/history", get(ceo::history))
+        .route("/api/ceo/clear", post(ceo::clear_history))
         .layer(axum::extract::DefaultBodyLimit::max(65_536))
         .with_state(AppState {
             db: Arc::new(db),

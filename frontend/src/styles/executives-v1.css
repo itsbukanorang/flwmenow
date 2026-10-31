@@ -807,3 +807,218 @@ flwmeTalkWorkspaceMinimize {
 }
 
 /* FLWME CEO TALK WINDOW V3 END */
+
+/* FLWME CEO TALK BUBBLES V4 START */
+
+.studio-talk-row {
+  width: 100% !important;
+  display: flex !important;
+  align-items: flex-end !important;
+  margin: 4px 0 !important;
+}
+
+.studio-talk-row-user {
+  justify-content: flex-end !important;
+}
+
+.studio-talk-row-ceo {
+  justify-content: flex-start !important;
+}
+
+.studio-talk-bubble {
+  display: block !important;
+
+  width: fit-content !important;
+  max-width: min(78%, 760px) !important;
+
+  padding: 12px 15px !important;
+
+  border-radius: 18px !important;
+
+  font-size: 14px !important;
+  font-weight: 400 !important;
+  line-height: 1.55 !important;
+
+  white-space: pre-wrap !important;
+  overflow-wrap: anywhere !important;
+
+  user-select: text !important;
+
+  box-sizing: border-box !important;
+}
+
+.studio-talk-bubble-user {
+  margin-left: auto !important;
+
+  color: #ffffff !important;
+
+  background:
+    linear-gradient(
+      135deg,
+      #1671d9 0%,
+      #2081ed 100%
+    ) !important;
+
+  border:
+    1px solid
+    rgba(96, 179, 255, 0.26) !important;
+
+  border-bottom-right-radius:
+    6px !important;
+
+  box-shadow:
+    0 8px 24px
+    rgba(0, 76, 170, 0.18) !important;
+}
+
+.studio-talk-bubble-ceo {
+  margin-right: auto !important;
+
+  color:
+    rgba(238, 247, 255, 0.96) !important;
+
+  background:
+    rgba(13, 43, 68, 0.96) !important;
+
+  border:
+    1px solid
+    rgba(103, 166, 216, 0.20) !important;
+
+  border-bottom-left-radius:
+    6px !important;
+
+  box-shadow:
+    0 8px 24px
+    rgba(0, 0, 0, 0.14) !important;
+}
+
+.studio-talk-bubble-thinking {
+  color:
+    rgba(174, 207, 235, 0.74) !important;
+
+  font-style: italic !important;
+
+  opacity: 0.88;
+}
+
+/* FLWME CEO TALK BUBBLES V4 END */
+
+/* FLWME CEO THINKING SPINNER V1 START */
+
+@keyframes flwme-ceo-thinking-spin {
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.studio-talk-bubble-thinking {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 10px !important;
+}
+
+.studio-talk-bubble-thinking::before {
+  content: "";
+  display: inline-block;
+
+  width: 15px;
+  height: 15px;
+
+  flex: 0 0 15px;
+
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+
+  border-radius: 999px;
+
+  animation:
+    flwme-ceo-thinking-spin
+    0.75s
+    linear
+    infinite;
+}
+
+/* FLWME CEO THINKING SPINNER V1 END */
+
+/* FLWME CEO TALK META FINAL V3 */
+
+.studio-talk-message-text {
+  display: block;
+
+  white-space: pre-wrap;
+
+  overflow-wrap: anywhere;
+}
+
+.studio-talk-time {
+  display: block;
+
+  margin-top: 8px;
+
+  font-size: 10px;
+  line-height: 1;
+
+  font-weight: 500;
+
+  font-variant-numeric:
+    tabular-nums;
+
+  text-align: right;
+
+  opacity: 0.48;
+
+  user-select: none;
+}
+
+.studio-talk-bubble-user
+.studio-talk-time {
+  color:
+    rgba(
+      255,
+      255,
+      255,
+      0.92
+    );
+}
+
+.studio-talk-bubble-ceo
+.studio-talk-time {
+  color:
+    rgba(
+      196,
+      220,
+      239,
+      0.90
+    );
+}
+
+.studio-talk-bubble-thinking {
+  display: inline-flex !important;
+
+  align-items: center !important;
+
+  gap: 8px !important;
+
+  font-variant-numeric:
+    tabular-nums;
+}
+
+.studio-talk-thinking-status {
+  font-weight: 500;
+}
+
+.studio-talk-thinking-time {
+  min-width: 32px;
+
+  opacity: 0.58;
+
+  font-size: 12px;
+
+  font-style: normal;
+}
+
+/* FLWME CEO TALK META FINAL V3 END */
