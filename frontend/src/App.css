@@ -350,3 +350,23 @@ button:focus-visible,
     transition-duration: 0.01ms !important;
   }
 }
+
+/* FLWME uploaded logo */
+
+.auth-brand-logo {
+  position: absolute;
+  top: 35px;
+  left: 32px;
+  width: 155px;
+  height: auto;
+  display: block;
+  object-fit: contain;
+}
+
+/* Original FLWME identity PNG */
+.auth-brand-logo {
+  width: 205px !important;
+  height: auto !important;
+  object-fit: contain;
+  image-rendering: auto;
+}

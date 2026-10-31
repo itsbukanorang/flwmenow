@@ -26,7 +26,13 @@ export default function AuthLayout({ title, children }: { title: string; childre
         <div className="floor-ray floor-ray-left" />
         <div className="floor-ray floor-ray-right" />
       </div>
-      <div className="brand-plate"><span className="brand-name">FLWME<span>.</span></span></div>
+      <div className="brand-plate">
+        <img
+          src="/assets/flwme-logo.png"
+          alt="FLWME"
+          className="auth-brand-logo"
+        />
+      </div>
       <section className="login-card" aria-labelledby="auth-title">
         <h1 id="auth-title">{title}</h1>
         {children}
