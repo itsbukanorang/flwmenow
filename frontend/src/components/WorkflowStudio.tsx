@@ -10,8 +10,10 @@ import {
   ChevronLeft,
   ChevronRight,
   Maximize2,
+  Mic,
   Minus,
   Paperclip,
+  Minimize2,
   Plus,
   RotateCcw,
   Send,
@@ -26,6 +28,51 @@ type Props = {
   company: Company | null
   onBack: () => void
 }
+
+type CeoChatResponse = {
+  reply?: string
+  error?: string
+  model?: string
+  cached_tokens?: number
+}
+
+type TalkMessage = {
+  id: number
+  role: 'user' | 'ceo'
+  text: string
+}
+
+type TalkView = 'normal' | 'maximized' | 'minimized'
+
+type SpeechAlternativeLike = {
+  transcript: string
+}
+
+type SpeechResultLike = {
+  readonly length: number
+  readonly [index: number]: SpeechAlternativeLike
+}
+
+type SpeechEventLike = {
+  readonly results: {
+    readonly length: number
+    readonly [index: number]: SpeechResultLike
+  }
+}
+
+type SpeechRecognitionLike = {
+  lang: string
+  interimResults: boolean
+  continuous: boolean
+  start: () => void
+  stop: () => void
+  onresult: ((event: SpeechEventLike) => void) | null
+  onend: (() => void) | null
+  onerror: (() => void) | null
+}
+
+type SpeechRecognitionConstructor =
+  new () => SpeechRecognitionLike
 
 type Point = {
   x: number
@@ -190,6 +237,9 @@ export default function WorkflowStudio({
   const canvasRef = useRef<HTMLDivElement>(null)
   const talkTextareaRef = useRef<HTMLTextAreaElement>(null)
   const attachmentInputRef = useRef<HTMLInputElement>(null)
+  const talkThreadRef = useRef<HTMLDivElement>(null)
+  const talkBoxRef = useRef<HTMLDivElement>(null)
+  const speechRef = useRef<SpeechRecognitionLike | null>(null)
 
   const [zoom, setZoom] = useState(0.8)
 
@@ -223,6 +273,18 @@ export default function WorkflowStudio({
   const [talkNotice, setTalkNotice] =
     useState('')
 
+  const [talkBusy, setTalkBusy] =
+    useState(false)
+
+  const [talkMessages, setTalkMessages] =
+    useState<TalkMessage[]>([])
+
+  const [talkView, setTalkView] =
+    useState<TalkView>('normal')
+
+  const [voiceListening, setVoiceListening] =
+    useState(false)
+
   const [executiveRoles, setExecutiveRoles] =
     useState<ExecutiveRole[]>(() => loadRoles(company?.id))
 
@@ -240,7 +302,28 @@ export default function WorkflowStudio({
     setWorkers([])
     setManageExecutivesOpen(false)
     setExecutiveOverrides({})
+    setTalkText('')
+    setTalkNotice('')
+    setTalkBusy(false)
+    setTalkMessages([])
+    setTalkView('normal')
+
+    try {
+      speechRef.current?.stop()
+    } catch {
+      // recognition may already be stopped
+    }
+
+    speechRef.current = null
+    setVoiceListening(false)
   }, [company?.id])
+
+  useEffect(() => {
+    const thread = talkThreadRef.current
+    if (!thread) return
+
+    thread.scrollTop = thread.scrollHeight
+  }, [talkMessages, talkBusy])
 
   const executivePoint = (role: ExecutiveRole): Point => {
     const override = executiveOverrides[role]
@@ -303,6 +386,15 @@ export default function WorkflowStudio({
     if (!canvas) return
 
     const handleWheel = (event: WheelEvent) => {
+      const target = event.target
+
+      if (
+        target instanceof Element &&
+        target.closest('.studio-ceo-talk')
+      ) {
+        return
+      }
+
       event.preventDefault()
 
       const delta =
@@ -412,12 +504,183 @@ export default function WorkflowStudio({
     setAddWorkerOpen(false)
   }
 
-  const draftTalk = () => {
-    if (!talkText.trim()) return
+  const toggleVoiceInput = () => {
+    if (voiceListening) {
+      try {
+        speechRef.current?.stop()
+      } catch {
+        // recognition may already be stopped
+      }
 
-    setTalkNotice(
-      'CEO runtime is not connected yet. Message kept as a local draft.',
+      return
+    }
+
+    const speechWindow = window as Window & {
+      SpeechRecognition?: SpeechRecognitionConstructor
+      webkitSpeechRecognition?: SpeechRecognitionConstructor
+    }
+
+    const Recognition =
+      speechWindow.SpeechRecognition ??
+      speechWindow.webkitSpeechRecognition
+
+    if (!Recognition) {
+      setTalkNotice(
+        'Voice input is not supported by this browser.',
+      )
+      return
+    }
+
+    const recognition = new Recognition()
+    const existingText = talkText.trimEnd()
+
+    recognition.lang =
+      navigator.language || 'en-US'
+
+    recognition.interimResults = true
+    recognition.continuous = false
+
+    recognition.onresult = (event) => {
+      let transcript = ''
+
+      for (
+        let index = 0;
+        index < event.results.length;
+        index += 1
+      ) {
+        const result = event.results[index]
+        const alternative = result?.[0]
+
+        if (alternative?.transcript) {
+          transcript += `${alternative.transcript} `
+        }
+      }
+
+      const clean = transcript.trim()
+
+      if (!clean) return
+
+      setTalkText(
+        existingText
+          ? `${existingText} ${clean}`
+          : clean,
+      )
+
+      setTalkNotice('')
+
+      requestAnimationFrame(
+        resizeTalkInput,
+      )
+    }
+
+    recognition.onerror = () => {
+      setVoiceListening(false)
+      speechRef.current = null
+
+      setTalkNotice(
+        'Voice input could not start. Check microphone permission and try again.',
+      )
+    }
+
+    recognition.onend = () => {
+      setVoiceListening(false)
+      speechRef.current = null
+    }
+
+    speechRef.current = recognition
+
+    try {
+      recognition.start()
+      setVoiceListening(true)
+      setTalkNotice('')
+    } catch {
+      speechRef.current = null
+      setVoiceListening(false)
+
+      setTalkNotice(
+        'Voice input is already active or unavailable.',
+      )
+    }
+  }
+
+  const sendTalk = async () => {
+    const message = talkText.trim()
+
+    if (!message || !company || talkBusy) return
+
+    if (attachments.length > 0) {
+      setTalkNotice(
+        'File runtime is not connected yet. Send a text message for now.',
+      )
+      return
+    }
+
+    setTalkBusy(true)
+    setTalkNotice('')
+
+    setTalkMessages((current) => [
+      ...current,
+      {
+        id: Date.now(),
+        role: 'user',
+        text: message,
+      },
+    ])
+
+    setTalkText('')
+    setAttachments([])
+
+    requestAnimationFrame(
+      resizeTalkInput,
     )
+
+    try {
+      const response = await fetch('/api/ceo/chat', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          company_id: company.id,
+          message,
+        }),
+      })
+
+      const data =
+        (await response.json()) as CeoChatResponse
+
+      if (!response.ok) {
+        throw new Error(
+          data.error || 'CEO is unavailable',
+        )
+      }
+
+      const reply = data.reply?.trim()
+
+      if (!reply) {
+        throw new Error(
+          'CEO returned an empty response',
+        )
+      }
+
+      setTalkMessages((current) => [
+        ...current,
+        {
+          id: Date.now() + 1,
+          role: 'ceo',
+          text: reply,
+        },
+      ])
+    } catch (error) {
+      setTalkNotice(
+        error instanceof Error
+          ? error.message
+          : 'CEO is unavailable',
+      )
+    } finally {
+      setTalkBusy(false)
+    }
   }
 
   if (!company) {
@@ -1005,7 +1268,16 @@ export default function WorkflowStudio({
             ))}
           </div>
 
-          <div className="studio-ceo-talk">
+          <div
+            ref={talkBoxRef}
+            className={`studio-ceo-talk studio-ceo-talk-${talkView}`}
+            onPointerDown={(event) =>
+              event.stopPropagation()
+            }
+            onMouseDown={(event) =>
+              event.stopPropagation()
+            }
+          >
             <div className="studio-talk-heading">
               <div>
                 <img
@@ -1017,7 +1289,102 @@ export default function WorkflowStudio({
                 <strong>CEO Talk</strong>
               </div>
 
-              <span>Draft mode</span>
+              <div className="studio-talk-window-controls">
+                {talkView === 'minimized' ? (
+                  <button
+                    type="button"
+                    title="Maximize CEO Talk"
+                    aria-label="Maximize CEO Talk"
+                    onClick={() =>
+                      setTalkView('normal')
+                    }
+                  >
+                    <Maximize2 size={15} />
+                  </button>
+                ) : (
+                  <>
+                    <button
+                      type="button"
+                      title="Minimize CEO Talk"
+                      aria-label="Minimize CEO Talk"
+                      onClick={() =>
+                        setTalkView('minimized')
+                      }
+                    >
+                      <Minus size={15} />
+                    </button>
+
+                    <button
+                      type="button"
+                      title={
+                        talkView === 'maximized'
+                          ? 'Restore CEO Talk'
+                          : 'Maximize CEO Talk'
+                      }
+                      aria-label={
+                        talkView === 'maximized'
+                          ? 'Restore CEO Talk'
+                          : 'Maximize CEO Talk'
+                      }
+                      onClick={() =>
+                        setTalkView(
+                          (current) =>
+                            current === 'maximized'
+                              ? 'normal'
+                              : 'maximized',
+                        )
+                      }
+                    >
+                      {talkView === 'maximized' ? (
+                        <Minimize2 size={15} />
+                      ) : (
+                        <Maximize2 size={15} />
+                      )}
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
+
+            <div
+              ref={talkThreadRef}
+              className="studio-talk-thread"
+            >
+              {talkMessages.length === 0 &&
+                !talkBusy && (
+                  <div className="studio-talk-empty">
+                    Good Day, What's Our Plan Today?
+                  </div>
+                )}
+
+              {talkMessages.map((item) => (
+                <div
+                  key={item.id}
+                  className={
+                    item.role === 'user'
+                      ? 'studio-talk-row studio-talk-row-user'
+                      : 'studio-talk-row studio-talk-row-ceo'
+                  }
+                >
+                  <div
+                    className={
+                      item.role === 'user'
+                        ? 'studio-talk-bubble studio-talk-bubble-user'
+                        : 'studio-talk-bubble studio-talk-bubble-ceo'
+                    }
+                  >
+                    {item.text}
+                  </div>
+                </div>
+              ))}
+
+              {talkBusy && (
+                <div className="studio-talk-row studio-talk-row-ceo">
+                  <div className="studio-talk-bubble studio-talk-bubble-ceo studio-talk-bubble-thinking">
+                    CEO is thinking…
+                  </div>
+                </div>
+              )}
             </div>
 
             {attachments.length > 0 && (
@@ -1086,6 +1453,24 @@ export default function WorkflowStudio({
                 <Paperclip size={15} />
               </button>
 
+              <button
+                type="button"
+                className={
+                  voiceListening
+                    ? 'studio-talk-voice active'
+                    : 'studio-talk-voice'
+                }
+                onClick={toggleVoiceInput}
+                title={
+                  voiceListening
+                    ? 'Stop voice input'
+                    : 'Voice to text'
+                }
+                aria-label="Voice to text"
+              >
+                <Mic size={15} />
+              </button>
+
               <textarea
                 ref={talkTextareaRef}
                 rows={1}
@@ -1100,7 +1485,17 @@ export default function WorkflowStudio({
                     resizeTalkInput,
                   )
                 }}
-                placeholder="What's your plan today, boss?"
+                placeholder="Type your message here"
+                onKeyDown={(event) => {
+                  if (
+                    event.key === 'Enter' &&
+                    !event.shiftKey &&
+                    !event.nativeEvent.isComposing
+                  ) {
+                    event.preventDefault()
+                    void sendTalk()
+                  }
+                }}
                 onPointerDown={(event) =>
                   event.stopPropagation()
                 }
@@ -1110,10 +1505,10 @@ export default function WorkflowStudio({
                 type="button"
                 className="studio-talk-send"
                 disabled={
-                  !talkText.trim() &&
-                  attachments.length === 0
+                  talkBusy ||
+                  !talkText.trim()
                 }
-                onClick={draftTalk}
+                onClick={sendTalk}
               >
                 <Send size={15} />
               </button>

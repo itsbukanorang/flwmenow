@@ -46,6 +46,54 @@ type Section =
   | 'companies'
   | 'workflow'
 
+const DASHBOARD_SECTION_KEY =
+  'flwme:dashboard:section'
+
+const WORKFLOW_COMPANY_KEY =
+  'flwme:workflow:company-id'
+
+function loadDashboardSection(): Section {
+  try {
+    const value =
+      sessionStorage.getItem(
+        DASHBOARD_SECTION_KEY,
+      )
+
+    if (
+      value === 'dashboard' ||
+      value === 'companies' ||
+      value === 'workflow'
+    ) {
+      return value
+    }
+  } catch {
+    // session storage unavailable
+  }
+
+  return 'dashboard'
+}
+
+function loadWorkflowCompanyId():
+  number | null {
+  try {
+    const value =
+      sessionStorage.getItem(
+        WORKFLOW_COMPANY_KEY,
+      )
+
+    if (!value) return null
+
+    const id = Number(value)
+
+    return Number.isSafeInteger(id) &&
+      id > 0
+      ? id
+      : null
+  } catch {
+    return null
+  }
+}
+
 function userNameFromEmail(email: string) {
   const local = email.split('@')[0] ?? ''
   const first =
@@ -117,7 +165,9 @@ function MetricCard({
 
 export default function DashboardPage() {
   const [section, setSection] =
-    useState<Section>('dashboard')
+    useState<Section>(
+      loadDashboardSection,
+    )
 
   const [user, setUser] =
     useState<User | null>(null)
@@ -136,26 +186,74 @@ export default function DashboardPage() {
 
     authRequest<User>('me', 'GET')
       .then(async (data) => {
+        let items: Company[] = []
+
+        try {
+          items = await getCompanies()
+        } catch {
+          // company list unavailable
+        }
+
         if (!active) return
 
         setUser(data)
+        setCompanies(items)
 
-        try {
-          const items = await getCompanies()
+        if (
+          loadDashboardSection() ===
+          'workflow'
+        ) {
+          const companyId =
+            loadWorkflowCompanyId()
 
-          if (active) {
-            setCompanies(items)
+          const restored =
+            companyId === null
+              ? null
+              : items.find(
+                  (company) =>
+                    company.id ===
+                    companyId,
+                ) ?? null
+
+          if (restored) {
+            setSelectedCompany(restored)
+          } else {
+            try {
+              sessionStorage.setItem(
+                DASHBOARD_SECTION_KEY,
+                'companies',
+              )
+
+              sessionStorage.removeItem(
+                WORKFLOW_COMPANY_KEY,
+              )
+            } catch {
+              // session storage unavailable
+            }
+
+            setSection('companies')
           }
-        } catch {
-          // ignore during rollout
         }
       })
-      .catch(() => window.location.replace('/'))
+      .catch(() =>
+        window.location.replace('/'),
+      )
 
     return () => {
       active = false
     }
   }, [])
+
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(
+        DASHBOARD_SECTION_KEY,
+        section,
+      )
+    } catch {
+      // session storage unavailable
+    }
+  }, [section])
 
   const displayName = useMemo(
     () =>
@@ -171,6 +269,18 @@ export default function DashboardPage() {
         ok: boolean
       }>('logout', 'POST')
     } finally {
+      try {
+        sessionStorage.removeItem(
+          DASHBOARD_SECTION_KEY,
+        )
+
+        sessionStorage.removeItem(
+          WORKFLOW_COMPANY_KEY,
+        )
+      } catch {
+        // session storage unavailable
+      }
+
       window.location.replace('/')
     }
   }
@@ -600,6 +710,15 @@ export default function DashboardPage() {
                   )
                 }
                 onOpenWorkflow={(company) => {
+                  try {
+                    sessionStorage.setItem(
+                      WORKFLOW_COMPANY_KEY,
+                      String(company.id),
+                    )
+                  } catch {
+                    // session storage unavailable
+                  }
+
                   setSelectedCompany(company)
                   setSection('workflow')
                 }}

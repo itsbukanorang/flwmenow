@@ -1,26 +1,26 @@
 mod auth;
+mod ceo;
 mod companies;
 mod security;
 
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 
 use axum::{
-    routing::{delete, get, post, put},
     Router,
+    routing::{get, post, put},
 };
 use tokio_postgres::NoTls;
 
 #[derive(Clone)]
 pub struct AppState {
     db: Arc<tokio_postgres::Client>,
+    http: reqwest::Client,
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let conn = std::env::var("DATABASE_URL")
-        .unwrap_or_else(|_| {
-            "host=/var/run/postgresql dbname=flwmenow user=flwme-dev".to_string()
-        });
+        .unwrap_or_else(|_| "host=/var/run/postgresql dbname=flwmenow user=flwme-dev".to_string());
 
     let (db, connection) = tokio_postgres::connect(&conn, NoTls).await?;
 
@@ -30,23 +30,35 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     });
 
+    let http = reqwest::Client::builder()
+        .connect_timeout(Duration::from_secs(10))
+        .timeout(Duration::from_secs(90))
+        .build()?;
+
     let app = Router::new()
         .route("/api/healthz", get(|| async { "ok" }))
         .route("/api/auth/register", post(auth::register))
         .route("/api/auth/login", post(auth::login))
         .route("/api/auth/me", get(auth::me))
         .route("/api/auth/logout", post(auth::logout))
-        .route("/api/companies", get(companies::list).post(companies::create))
+        .route(
+            "/api/companies",
+            get(companies::list).post(companies::create),
+        )
         .route(
             "/api/companies/{company_id}",
             put(companies::update).delete(companies::remove),
         )
-        .layer(axum::extract::DefaultBodyLimit::max(4096))
-        .with_state(AppState { db: Arc::new(db) });
+        .route("/api/ceo/chat", post(ceo::chat))
+        .layer(axum::extract::DefaultBodyLimit::max(65_536))
+        .with_state(AppState {
+            db: Arc::new(db),
+            http,
+        });
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:18081").await?;
 
-    println!("FLWME_AUTH_LISTEN=127.0.0.1:18081");
+    println!("FLWME_RUNTIME_LISTEN=127.0.0.1:18081");
 
     axum::serve(listener, app).await?;
 

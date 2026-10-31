@@ -312,3 +312,498 @@
   padding: 3px;
   flex: none;
 }
+
+/* FLWME CEO TALK UX V2 START */
+
+.studio-ceo-talk {
+  transition:
+    width 220ms ease,
+    height 220ms ease,
+    max-height 220ms ease,
+    transform 220ms ease,
+    opacity 180ms ease,
+    box-shadow 220ms ease !important;
+  transform-origin: center bottom;
+}
+
+.studio-ceo-talk-maximized {
+  position: fixed !important;
+  inset: 70px 28px 28px 28px !important;
+  z-index: 5000 !important;
+  width: auto !important;
+  max-width: none !important;
+  height: auto !important;
+  max-height: none !important;
+  display: flex !important;
+  flex-direction: column !important;
+  animation: flwmeTalkOpen 220ms ease-out;
+  box-shadow:
+    0 30px 90px rgba(0, 0, 0, 0.48) !important;
+}
+
+.studio-ceo-talk-maximized .studio-talk-thread {
+  flex: 1 1 auto !important;
+  min-height: 0 !important;
+  max-height: none !important;
+}
+
+.studio-ceo-talk-minimized {
+  height: 64px !important;
+  min-height: 64px !important;
+  max-height: 64px !important;
+  overflow: hidden !important;
+  animation: flwmeTalkMinimize 180ms ease-out;
+}
+
+.studio-ceo-talk-minimized .studio-talk-thread,
+.studio-ceo-talk-minimized .studio-talk-input,
+.studio-ceo-talk-minimized .studio-talk-attachments,
+.studio-ceo-talk-minimized .studio-talk-notice {
+  display: none !important;
+}
+
+.studio-ceo-talk:fullscreen {
+  width: 100% !important;
+  height: 100% !important;
+  max-width: none !important;
+  max-height: none !important;
+  padding: 22px !important;
+  border-radius: 0 !important;
+  display: flex !important;
+  flex-direction: column !important;
+  background: #03182b !important;
+}
+
+.studio-ceo-talk:fullscreen .studio-talk-thread {
+  flex: 1 1 auto !important;
+  max-height: none !important;
+  min-height: 0 !important;
+}
+
+.studio-talk-window-controls {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-left: auto;
+}
+
+.studio-talk-window-controls button {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border-radius: 9px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(109, 168, 216, 0.18);
+  background: rgba(10, 41, 66, 0.62);
+  color: rgba(201, 225, 245, 0.78);
+  cursor: pointer;
+  transition:
+    transform 140ms ease,
+    background 140ms ease,
+    color 140ms ease,
+    border-color 140ms ease;
+}
+
+.studio-talk-window-controls button:hover {
+  transform: translateY(-1px);
+  background: rgba(20, 63, 96, 0.82);
+  color: #ffffff;
+  border-color: rgba(118, 190, 245, 0.38);
+}
+
+.studio-talk-window-controls button.active {
+  color: #ffffff;
+  background: rgba(31, 111, 190, 0.68);
+}
+
+.studio-talk-thread {
+  min-height: 260px !important;
+  max-height: 410px !important;
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color:
+    rgba(112, 160, 198, 0.42)
+    transparent;
+  user-select: text !important;
+  cursor: default;
+}
+
+.studio-talk-thread::-webkit-scrollbar {
+  width: 8px;
+}
+
+.studio-talk-thread::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.studio-talk-thread::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background:
+    rgba(112, 160, 198, 0.42);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+.studio-talk-thread::-webkit-scrollbar-thumb:hover {
+  background:
+    rgba(139, 191, 231, 0.62);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+.studio-talk-thread::-webkit-scrollbar-button {
+  width: 0;
+  height: 0;
+  display: none;
+}
+
+.studio-talk-bubble {
+  user-select: text !important;
+  cursor: text;
+}
+
+.studio-talk-empty {
+  min-height: 210px !important;
+  font-size: 20px !important;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: rgba(201, 220, 238, 0.82) !important;
+}
+
+.studio-talk-input textarea {
+  color: #ffffff !important;
+  caret-color: #ffffff !important;
+  user-select: text !important;
+  -webkit-user-select: text !important;
+}
+
+.studio-talk-input textarea::placeholder {
+  color: rgba(180, 202, 222, 0.44) !important;
+  opacity: 1;
+}
+
+.studio-talk-voice {
+  flex: 0 0 auto;
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  border: 1px solid rgba(86, 155, 205, 0.12);
+  background: rgba(8, 44, 69, 0.64);
+  color: rgba(165, 210, 242, 0.86);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition:
+    transform 150ms ease,
+    color 150ms ease,
+    background 150ms ease,
+    box-shadow 150ms ease;
+}
+
+.studio-talk-voice:hover {
+  transform: translateY(-1px);
+  color: #ffffff;
+  background: rgba(15, 64, 96, 0.84);
+}
+
+.studio-talk-voice.active {
+  color: #8bffc0;
+  background: rgba(24, 112, 72, 0.34);
+  box-shadow:
+    0 0 0 4px rgba(34, 197, 94, 0.08),
+    0 0 22px rgba(34, 197, 94, 0.14);
+  animation: flwmeVoicePulse 1.15s ease-in-out infinite;
+}
+
+@keyframes flwmeTalkOpen {
+  from {
+    opacity: 0.84;
+    transform: scale(0.975);
+  }
+
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes flwmeTalkMinimize {
+  from {
+    opacity: 0.82;
+    transform: scale(0.985);
+  }
+
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes flwmeVoicePulse {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+
+  50% {
+    transform: scale(1.06);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .studio-ceo-talk,
+  .studio-talk-window-controls button,
+  .studio-talk-voice {
+    transition: none !important;
+    animation: none !important;
+  }
+}
+
+/* FLWME CEO TALK UX V2 END */
+
+/* FLWME CEO TALK EMPTY CENTER START */
+
+.studio-talk-thread {
+  display: flex !important;
+  flex-direction: column !important;
+}
+
+.studio-talk-empty {
+  flex: 1 1 auto !important;
+  width: 100% !important;
+  min-height: 250px !important;
+
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+
+  margin: 0 !important;
+  padding: 24px !important;
+
+  text-align: center !important;
+
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+
+  color: rgba(206, 224, 240, 0.76) !important;
+
+  font-size: clamp(20px, 1.7vw, 28px) !important;
+  font-weight: 600 !important;
+  line-height: 1.3 !important;
+  letter-spacing: -0.025em !important;
+
+  user-select: none;
+}
+
+/* FLWME CEO TALK EMPTY CENTER END */
+
+/* FLWME CEO TALK WINDOW V3 START */
+
+/*
+  NORMAL:
+  existing component positioning remains untouched.
+*/
+
+.studio-ceo-talk {
+  transition:
+    left 200ms ease,
+    right 200ms ease,
+    top 200ms ease,
+    bottom 200ms ease,
+    width 200ms ease,
+    height 200ms ease,
+    max-height 200ms ease,
+    transform 200ms ease,
+    opacity 160ms ease,
+    box-shadow 200ms ease !important;
+}
+
+
+/*
+  MAXIMIZED:
+  fill the Workflow Studio canvas,
+  NOT the browser viewport.
+*/
+
+.studio-ceo-talk-maximized {
+  position: absolute !important;
+
+  inset: 16px !important;
+
+  left: 16px !important;
+  right: 16px !important;
+  top: 16px !important;
+  bottom: 16px !important;
+
+  width: auto !important;
+  max-width: none !important;
+
+  height: auto !important;
+  min-height: 0 !important;
+  max-height: none !important;
+
+  margin: 0 !important;
+
+  transform: none !important;
+
+  z-index: 100 !important;
+
+  display: flex !important;
+  flex-direction: column !important;
+
+  overflow: hidden !important;
+
+  box-shadow:
+    0 24px 80px rgba(0, 0, 0, 0.52) !important;
+
+  animation:
+    flwmeTalkWorkspaceMaximize
+    180ms ease-out;
+}
+
+.studio-ceo-talk-maximized
+.studio-talk-thread {
+  flex: 1 1 auto !important;
+
+  min-height: 0 !important;
+  max-height: none !important;
+
+  overflow-y: auto !important;
+}
+
+.studio-ceo-talk-maximized
+.studio-talk-input {
+  flex: 0 0 auto !important;
+}
+
+
+/*
+  MINIMIZED:
+  title bar only.
+*/
+
+.studio-ceo-talk-minimized {
+  height: 58px !important;
+  min-height: 58px !important;
+  max-height: 58px !important;
+
+  overflow: hidden !important;
+
+  animation:
+    flwmeTalkWorkspaceMinimize
+    160ms ease-out;
+}
+
+.studio-ceo-talk-minimized
+.studio-talk-thread,
+
+.studio-ceo-talk-minimized
+.studio-talk-input,
+
+.studio-ceo-talk-minimized
+.studio-talk-attachments,
+
+.studio-ceo-talk-minimized
+.studio-talk-notice {
+  display: none !important;
+}
+
+
+/*
+  Controls
+*/
+
+.studio-talk-window-controls {
+  display: flex !important;
+
+  align-items: center !important;
+
+  gap: 7px !important;
+
+  margin-left: auto !important;
+}
+
+.studio-talk-window-controls button {
+  box-sizing: border-box;
+
+  flex: 0 0 30px;
+
+  width: 30px;
+  height: 30px;
+
+  padding: 0;
+
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  border-radius: 9px;
+
+  border:
+    1px solid rgba(109, 168, 216, 0.18);
+
+  background:
+    rgba(10, 41, 66, 0.62);
+
+  color:
+    rgba(201, 225, 245, 0.80);
+
+  cursor: pointer;
+
+  transition:
+    transform 130ms ease,
+    background 130ms ease,
+    border-color 130ms ease,
+    color 130ms ease;
+}
+
+.studio-talk-window-controls
+button:hover {
+  transform:
+    translateY(-1px);
+
+  color: #ffffff;
+
+  background:
+    rgba(20, 63, 96, 0.88);
+
+  border-color:
+    rgba(118, 190, 245, 0.38);
+}
+
+
+@keyframes
+flwmeTalkWorkspaceMaximize {
+  from {
+    opacity: 0.88;
+
+    transform:
+      scale(0.985);
+  }
+
+  to {
+    opacity: 1;
+
+    transform:
+      scale(1);
+  }
+}
+
+@keyframes
+flwmeTalkWorkspaceMinimize {
+  from {
+    opacity: 0.86;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+/* FLWME CEO TALK WINDOW V3 END */
