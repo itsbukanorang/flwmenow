@@ -1,9 +1,11 @@
 mod auth;
 mod ceo;
 mod companies;
+mod delegation;
 mod executive;
 mod security;
 
+mod tasks;
 use std::{sync::Arc, time::Duration};
 
 use axum::{
@@ -35,6 +37,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .connect_timeout(Duration::from_secs(10))
         .timeout(Duration::from_secs(90))
         .build()?;
+    let state = AppState {
+        db: Arc::new(db),
+        http,
+    };
+
+    tasks::start_workers(state.clone());
 
     let app = Router::new()
         .route("/api/healthz", get(|| async { "ok" }))
@@ -54,11 +62,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/ceo/history", get(ceo::history))
         .route("/api/ceo/clear", post(ceo::clear_history))
         .route("/api/executives/cto/run", post(executive::run_cto))
+        .route(
+            "/api/delegations/active",
+            get(delegation::active_delegation),
+        )
+        .route(
+            "/api/delegations/cto/run",
+            post(delegation::run_cto_delegation),
+        )
         .layer(axum::extract::DefaultBodyLimit::max(65_536))
-        .with_state(AppState {
-            db: Arc::new(db),
-            http,
-        });
+        .route("/api/tasks", get(tasks::list))
+        .route("/api/tasks/{task_id}", get(tasks::detail))
+        .with_state(state);
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:18081").await?;
 

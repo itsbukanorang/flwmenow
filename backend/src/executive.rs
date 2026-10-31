@@ -57,15 +57,15 @@ If no worker execution is needed, requires_worker must be false and
 worker_brief must be null.
 "#;
 
-#[derive(Debug, Deserialize, Serialize)]
-pub struct ExecutiveTask {
-    objective: String,
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub(crate) struct ExecutiveTask {
+    pub(crate) objective: String,
 
     #[serde(default)]
-    context: Option<String>,
+    pub(crate) context: Option<String>,
 
     #[serde(default)]
-    constraints: Vec<String>,
+    pub(crate) constraints: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -326,6 +326,149 @@ async fn recall_company_memory(
         .await
         .map(|value| value.memories)
         .map_err(|_| ())
+}
+
+pub(crate) async fn execute_cto_for_user(
+    state: &AppState,
+    company_id: i64,
+    user_id: i64,
+    task: &ExecutiveTask,
+) -> Result<Value, String> {
+    if let Err(message) = validate_task(task) {
+        return Err(message.to_string());
+    }
+
+    let (company_name, company_status) = company_context(state, company_id, user_id)
+        .await
+        .map_err(|_| "Company context unavailable".to_string())?
+        .ok_or_else(|| "Company not found".to_string())?;
+
+    let mut recall_query = task.objective.clone();
+
+    if let Some(context) = task.context.as_deref() {
+        recall_query.push('\n');
+        recall_query.push_str(context);
+    }
+
+    let memories = recall_company_memory(state, company_id, user_id, &recall_query)
+        .await
+        .map_err(|_| "Executive memory unavailable".to_string())?;
+
+    let memory_context = if memories.is_empty() {
+        "No relevant company memory was retrieved.".to_string()
+    } else {
+        memories
+            .iter()
+            .enumerate()
+            .map(|(index, item)| format!("{}. [{}]\n{}", index + 1, item.kind, item.content,))
+            .collect::<Vec<_>>()
+            .join("\n\n")
+    };
+
+    let baseten_key = std::env::var("BASETEN_API_KEY")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| "Executive provider unavailable".to_string())?;
+
+    let company_prompt = format!(
+        "COMPANY CONTEXT\n\
+             Name: {company_name}\n\
+             Status: {company_status}\n\n\
+             This context belongs only to this company. \
+             Never mix it with another tenant."
+    );
+
+    let memory_prompt = format!(
+        "RELEVANT COMPANY MEMORY\n\
+             {memory_context}\n\n\
+             Treat CURRENT memory state as authoritative historical context, \
+             but the current typed task has higher authority if it explicitly \
+             changes or corrects an older value."
+    );
+
+    let task_json =
+        serde_json::to_string(task).map_err(|_| "Unable to encode executive task".to_string())?;
+
+    let messages: Vec<Value> = vec![
+        json!({
+            "role": "system",
+            "content":
+                CTO_SYSTEM_PROMPT,
+        }),
+        json!({
+            "role": "developer",
+            "content":
+                company_prompt,
+        }),
+        json!({
+            "role": "developer",
+            "content":
+                memory_prompt,
+        }),
+        json!({
+            "role": "user",
+            "content":
+                format!(
+                    "TYPED EXECUTIVE TASK\n{}",
+                    task_json,
+                ),
+        }),
+    ];
+
+    let payload = json!({
+        "model":
+            BASETEN_MODEL,
+        "messages":
+            messages,
+    });
+
+    let response = state
+        .http
+        .post(BASETEN_CHAT_URL)
+        .bearer_auth(baseten_key)
+        .json(&payload)
+        .timeout(Duration::from_secs(120))
+        .send()
+        .await
+        .map_err(|_| "Executive provider request failed".to_string())?;
+
+    if !response.status().is_success() {
+        return Err("Executive provider unavailable".to_string());
+    }
+
+    let parsed = response
+        .json::<BasetenResponse>()
+        .await
+        .map_err(|_| "Executive provider returned invalid response".to_string())?;
+
+    let BasetenResponse { model, choices } = parsed;
+
+    let choice = choices
+        .into_iter()
+        .next()
+        .ok_or_else(|| "Executive returned no answer".to_string())?;
+
+    let raw = choice.message.content.unwrap_or_default();
+
+    let result = parse_cto_result(&raw)
+        .ok_or_else(|| "Executive returned invalid structured result".to_string())?;
+
+    Ok(json!({
+        "executive":
+            "CTO",
+        "role":
+            "Chief Technology Officer",
+        "model":
+            model.unwrap_or_else(
+                ||
+                    BASETEN_MODEL
+                        .to_string()
+            ),
+        "memory_items_used":
+            memories.len(),
+        "result":
+            result,
+    }))
 }
 
 pub async fn run_cto(

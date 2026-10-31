@@ -10,6 +10,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Maximize2,
+  ListTodo,
   Mic,
   Minus,
   Paperclip,
@@ -30,17 +31,87 @@ type Props = {
   onBack: () => void
 }
 
+type TaskCard = {
+  task_id: string
+  title: string
+  assigned_to: string
+  status: string
+}
+
+type TaskRecord = TaskCard & {
+  company_id: number
+  objective: string
+  context?: string | null
+  constraints: string[]
+  attempt_count: number
+
+  result?: {
+    executive?: string
+    role?: string
+    model?: string
+    memory_items_used?: number
+
+    result?: {
+      assessment?: string
+      recommendations?: string[]
+      risks?: string[]
+      requires_worker?: boolean
+      worker_brief?: string | null
+    }
+  } | null
+
+  last_error?: string | null
+  run_id?: string | null
+  created_at: string
+  created_at_ms: number
+  started_at?: string | null
+  completed_at?: string | null
+  updated_at_ms: number
+}
+
+const taskDisplayTitle = (
+  value: string,
+) => {
+  const clean = value
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(
+      /^(please\s+)?(review|analyze|analyse|assess|evaluate|check)\s+(whether\s+)?(our\s+|the\s+)?(current\s+)?/i,
+      '',
+    )
+
+  const primary = clean
+    .split(/[.!?]/)[0]
+    .split(/\b(?:identify|including|and tell|and provide)\b/i)[0]
+    .trim()
+
+  const words = primary
+    .split(' ')
+    .filter(Boolean)
+
+  if (words.length <= 9) {
+    return primary || 'Executive Task'
+  }
+
+  return words
+    .slice(0, 9)
+    .join(' ')
+    .replace(/[,;:]$/, '')
+}
+
 type CeoChatResponse = {
   reply?: string
   error?: string
   model?: string
   cached_tokens?: number
+  task?: TaskCard
 }
 
 type TalkMessage = {
   id: number
   role: 'user' | 'ceo'
   text: string
+  taskId?: string | null
 }
 
 type CeoHistoryMessage = {
@@ -48,6 +119,7 @@ type CeoHistoryMessage = {
   role: 'user' | 'assistant'
   text: string
   created_at: string
+  task_id?: string | null
 }
 
 type CeoHistoryResponse = {
@@ -289,6 +361,21 @@ export default function WorkflowStudio({
   const [talkBusy, setTalkBusy] =
     useState(false)
 
+  const [activeExecutives, setActiveExecutives] =
+    useState<ExecutiveRole[]>([])
+
+  const [tasks, setTasks] =
+    useState<TaskRecord[]>([])
+
+  const [taskCenterOpen, setTaskCenterOpen] =
+    useState(false)
+
+  const [selectedTask, setSelectedTask] =
+    useState<TaskRecord | null>(null)
+
+  const [taskCenterTab, setTaskCenterTab] =
+    useState<'live' | 'done' | 'attention'>('live')
+
   const [talkClearing, setTalkClearing] =
     useState(false)
 
@@ -329,6 +416,10 @@ export default function WorkflowStudio({
     setTalkText('')
     setTalkNotice('')
     setTalkBusy(false)
+    setActiveExecutives([])
+    setTasks([])
+    setTaskCenterOpen(false)
+    setSelectedTask(null)
     setTalkClearing(false)
     setTalkMessages([])
     setTalkMessageTimes({})
@@ -375,6 +466,7 @@ export default function WorkflowStudio({
               role: 'user' | 'assistant'
               text: string
               created_at_ms?: number
+              task_id?: string | null
             }>
 
           const historyTimes:
@@ -401,6 +493,7 @@ export default function WorkflowStudio({
                     ? 'ceo'
                     : 'user',
                 text: item.text,
+                taskId: item.task_id,
               }),
             ),
           )
@@ -431,7 +524,18 @@ export default function WorkflowStudio({
     const thread = talkThreadRef.current
     if (!thread) return
 
-    thread.scrollTop = thread.scrollHeight
+    const distanceFromBottom =
+      thread.scrollHeight -
+      thread.scrollTop -
+      thread.clientHeight
+
+    const nearBottom =
+      distanceFromBottom <= 120
+
+    if (nearBottom || talkBusy) {
+      thread.scrollTop =
+        thread.scrollHeight
+    }
   }, [talkMessages, talkBusy])
 
   const executivePoint = (role: ExecutiveRole): Point => {
@@ -770,6 +874,183 @@ export default function WorkflowStudio({
     }
   }
 
+  // FLWME LIVE TASK RUNTIME
+  //
+  // Canonical source = durable PostgreSQL task state.
+  useEffect(() => {
+    const companyId = company?.id
+
+    if (!companyId) {
+      setTasks([])
+      setActiveExecutives([])
+      return
+    }
+
+    let active = true
+
+    const refreshTasks = async () => {
+      try {
+        const response = await fetch(
+          `/api/tasks?company_id=${companyId}`,
+          {
+            credentials: 'same-origin',
+            cache: 'no-store',
+          },
+        )
+
+        if (!response.ok) return
+
+        const data =
+          (await response.json()) as {
+            tasks?: TaskRecord[]
+          }
+
+        if (!active) return
+
+        const nextTasks =
+          data.tasks ?? []
+
+        setTasks(nextTasks)
+
+        setActiveExecutives(
+          Array.from(
+            new Set(
+              nextTasks
+                .filter(
+                  (task) =>
+                    task.status === 'running',
+                )
+                .map(
+                  (task) =>
+                    task.assigned_to,
+                )
+                .filter(
+                  (role):
+                    role is ExecutiveRole =>
+                    ROLES.includes(
+                      role as ExecutiveRole,
+                    ),
+                ),
+            ),
+          ),
+        )
+
+        setSelectedTask((current) => {
+          if (!current) return null
+
+          return (
+            nextTasks.find(
+              (task) =>
+                task.task_id ===
+                current.task_id,
+            ) ?? current
+          )
+        })
+      } catch {
+        // Runtime telemetry must never break CEO Talk.
+      }
+    }
+
+    const refreshHistory = async () => {
+      if (talkBusy) return
+
+      try {
+        const response = await fetch(
+          `/api/ceo/history?company_id=${companyId}`,
+          {
+            credentials: 'same-origin',
+            cache: 'no-store',
+          },
+        )
+
+        if (!response.ok) return
+
+        const data =
+          (await response.json()) as CeoHistoryResponse
+
+        if (!active) return
+
+        const history =
+          data.messages ?? []
+
+        const times:
+          Record<number, number> = {}
+
+        for (const item of history) {
+          times[item.id] =
+            Date.parse(item.created_at)
+        }
+
+        setTalkMessageTimes(times)
+
+        const nextMessages =
+          history.map((item) => ({
+            id: item.id,
+
+            role:
+              item.role === 'assistant'
+                ? 'ceo' as const
+                : 'user' as const,
+
+            text: item.text,
+
+            taskId: item.task_id,
+          }))
+
+        setTalkMessages((current) => {
+          const unchanged =
+            current.length ===
+              nextMessages.length &&
+            current.every(
+              (message, index) => {
+                const next =
+                  nextMessages[index]
+
+                return (
+                  message.id === next.id &&
+                  message.role === next.role &&
+                  message.text === next.text &&
+                  message.taskId === next.taskId
+                )
+              },
+            )
+
+          return unchanged
+            ? current
+            : nextMessages
+        })
+      } catch {
+        // API-09 SSE will replace this polling transport.
+      }
+    }
+
+    void refreshTasks()
+    void refreshHistory()
+
+    const taskTimer =
+      window.setInterval(
+        () => {
+          void refreshTasks()
+        },
+        500,
+      )
+
+    const historyTimer =
+      window.setInterval(
+        () => {
+          void refreshHistory()
+        },
+        1000,
+      )
+
+    return () => {
+      active = false
+
+      window.clearInterval(taskTimer)
+      window.clearInterval(historyTimer)
+    }
+  }, [company?.id, talkBusy])
+
   // FLWME CEO TALK ELAPSED TIMER
   useEffect(() => {
     if (!talkBusy) {
@@ -896,6 +1177,8 @@ export default function WorkflowStudio({
           id: ceoMessageId,
           role: 'ceo',
           text: reply,
+          taskId:
+            data.task?.task_id,
         },
       ])
     } catch (error) {
@@ -961,6 +1244,48 @@ export default function WorkflowStudio({
         </div>
 
         <div className="studio-header-actions">
+          <button
+            type="button"
+            className={
+              tasks.some(
+                (task) =>
+                  task.status === 'running' ||
+                  task.status === 'queued',
+              )
+                ? 'studio-task-center-button active'
+                : 'studio-task-center-button'
+            }
+            onClick={() => {
+              setSelectedTask(null)
+              setTaskCenterTab('live')
+              setTaskCenterOpen(true)
+            }}
+            title="Task Center"
+            aria-label="Task Center"
+          >
+            <ListTodo size={14} />
+
+            <span className="studio-task-center-label">
+              Tasks
+            </span>
+
+            {tasks.some(
+              (task) =>
+                task.status === 'running' ||
+                task.status === 'queued',
+            ) && (
+              <span className="studio-task-center-count">
+                {
+                  tasks.filter(
+                    (task) =>
+                      task.status === 'running' ||
+                      task.status === 'queued',
+                  ).length
+                }
+              </span>
+            )}
+          </button>
+
           <button
             type="button"
             onClick={() =>
@@ -1135,7 +1460,11 @@ export default function WorkflowStudio({
                     `M ${ceoPosition.x} ${ceoPosition.y + CEO_HEIGHT / 2}`,
                     `L ${ceoPosition.x} ${ceoPosition.y + 108}`,
                   ].join(' ')}
-                  className="studio-link-path"
+                  className={`studio-link-path${
+                    activeExecutives.length > 0
+                      ? ' is-neural-active'
+                      : ''
+                  }`}
                   vectorEffect="non-scaling-stroke"
                 />
               )}
@@ -1160,7 +1489,11 @@ export default function WorkflowStudio({
                       `${point.x} ${middleY}`,
                       `${point.x} ${targetY}`,
                     ].join(' ')}
-                    className="studio-link-path"
+                    className={`studio-link-path${
+                      activeExecutives.includes(role)
+                        ? ' is-neural-active'
+                        : ''
+                    }`}
                     vectorEffect="non-scaling-stroke"
                   />
                 )
@@ -1182,7 +1515,11 @@ export default function WorkflowStudio({
             </svg>
 
             <div
-              className="studio-ceo-node studio-node-card"
+              className={`studio-ceo-node studio-node-card${
+                activeExecutives.length > 0
+                  ? ' is-delegating'
+                  : ''
+              }`}
               style={{
                 left: '50%',
                 top: '50%',
@@ -1269,7 +1606,11 @@ export default function WorkflowStudio({
               return (
                 <div
                   key={role}
-                  className="studio-worker-node studio-node-card studio-exec-node"
+                  className={`studio-worker-node studio-node-card studio-exec-node${
+                    activeExecutives.includes(role)
+                      ? ' is-runtime-active'
+                      : ''
+                  }`}
                   style={{
                     left: '50%',
                     top: '50%',
@@ -1621,6 +1962,55 @@ export default function WorkflowStudio({
                       {item.text}
                     </span>
 
+                    {item.taskId && (
+                      <div className="studio-chat-task-action">
+                        <span>
+                          {
+                            tasks.find(
+                              (entry) =>
+                                entry.task_id ===
+                                item.taskId,
+                            )?.assigned_to ??
+                            'Executive'
+                          }
+
+                          {' · '}
+
+                          {
+                            tasks.find(
+                              (entry) =>
+                                entry.task_id ===
+                                item.taskId,
+                            )?.status ??
+                            'queued'
+                          }
+                        </span>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const task =
+                              tasks.find(
+                                (entry) =>
+                                  entry.task_id ===
+                                  item.taskId,
+                              )
+
+                            if (task) {
+                              setSelectedTask(task)
+                            }
+
+                            setTaskCenterOpen(true)
+                          }}
+                        >
+                          Open Task
+                          <span aria-hidden="true">
+                            →
+                          </span>
+                        </button>
+                      </div>
+                    )}
+
                     {talkMessageTimes[item.id] && (
                       <time
                         className="studio-talk-time"
@@ -1661,8 +2051,8 @@ export default function WorkflowStudio({
                         talkElapsedMs < 1800
                           ? 'Thinking'
                           : talkElapsedMs < 4200
-                            ? 'Working'
-                            : 'Composing'
+                            ? 'Planning'
+                            : 'Responding'
                       }
                     </span>
 
@@ -1813,6 +2203,419 @@ export default function WorkflowStudio({
               </p>
             )}
           </div>
+
+          {taskCenterOpen && (
+            <div
+              className="studio-task-center-backdrop"
+              onWheelCapture={(event) => {
+                event.stopPropagation()
+              }}
+              onTouchMove={(event) => {
+                event.stopPropagation()
+              }}
+              onMouseDown={(event) => {
+                if (
+                  event.target ===
+                  event.currentTarget
+                ) {
+                  setTaskCenterOpen(false)
+                  setSelectedTask(null)
+                }
+              }}
+            >
+              <section
+                className="studio-task-center"
+                onWheel={(event) => {
+                  event.stopPropagation()
+                }}
+              >
+                <header className="studio-task-center-head">
+                  <div>
+                    <small>TASK CENTER</small>
+
+                    <strong>
+                      {
+                        selectedTask
+                          ? 'Task Details'
+                          : 'Tasks'
+                      }
+                    </strong>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (selectedTask) {
+                        setSelectedTask(null)
+                      } else {
+                        setTaskCenterOpen(false)
+                      }
+                    }}
+                    aria-label={
+                      selectedTask
+                        ? 'Back to tasks'
+                        : 'Close Task Center'
+                    }
+                  >
+                    <X size={15} />
+                  </button>
+                </header>
+
+                {!selectedTask && (
+                  <nav className="studio-task-tabs">
+                    <button
+                      type="button"
+                      className={
+                        taskCenterTab === 'live'
+                          ? 'active'
+                          : ''
+                      }
+                      onClick={() =>
+                        setTaskCenterTab('live')
+                      }
+                    >
+                      Live
+
+                      <span>
+                        {
+                          tasks.filter(
+                            (task) =>
+                              task.status === 'queued' ||
+                              task.status === 'running',
+                          ).length
+                        }
+                      </span>
+                    </button>
+
+                    <button
+                      type="button"
+                      className={
+                        taskCenterTab === 'done'
+                          ? 'active'
+                          : ''
+                      }
+                      onClick={() =>
+                        setTaskCenterTab('done')
+                      }
+                    >
+                      Done
+
+                      <span>
+                        {
+                          tasks.filter(
+                            (task) =>
+                              task.status === 'completed',
+                          ).length
+                        }
+                      </span>
+                    </button>
+
+                    <button
+                      type="button"
+                      className={
+                        taskCenterTab === 'attention'
+                          ? 'active'
+                          : ''
+                      }
+                      onClick={() =>
+                        setTaskCenterTab('attention')
+                      }
+                    >
+                      Need Attention
+
+                      <span>
+                        {
+                          tasks.filter(
+                            (task) =>
+                              task.status === 'failed' ||
+                              task.status ===
+                                'need_attention',
+                          ).length
+                        }
+                      </span>
+                    </button>
+                  </nav>
+                )}
+
+                {selectedTask ? (
+                  <div className="studio-task-detail">
+                    <div className="studio-task-detail-title">
+                      <div>
+                        <strong>
+                          {
+                            taskDisplayTitle(
+                              selectedTask.title,
+                            )
+                          }
+                        </strong>
+
+                        <span>
+                          {selectedTask.task_id}
+                        </span>
+                      </div>
+
+                      <span
+                        className={`studio-task-status is-${selectedTask.status}`}
+                      >
+                        {selectedTask.status}
+                      </span>
+                    </div>
+
+                    <dl className="studio-task-meta">
+                      <div>
+                        <dt>Assigned to</dt>
+
+                        <dd>
+                          {selectedTask.assigned_to}
+                        </dd>
+                      </div>
+
+                      {selectedTask.run_id && (
+                        <div>
+                          <dt>Run</dt>
+
+                          <dd>
+                            {selectedTask.run_id}
+                          </dd>
+                        </div>
+                      )}
+                    </dl>
+
+                    <section>
+                      <small>OBJECTIVE</small>
+
+                      <p>
+                        {selectedTask.objective}
+                      </p>
+                    </section>
+
+                    {selectedTask.context && (
+                      <section>
+                        <small>CONTEXT</small>
+
+                        <p>
+                          {selectedTask.context}
+                        </p>
+                      </section>
+                    )}
+
+                    {selectedTask.constraints.length > 0 && (
+                      <section>
+                        <small>CONSTRAINTS</small>
+
+                        <ul>
+                          {selectedTask.constraints.map(
+                            (item) => (
+                              <li key={item}>
+                                {item}
+                              </li>
+                            ),
+                          )}
+                        </ul>
+                      </section>
+                    )}
+
+                    {selectedTask.status === 'running' && (
+                      <div className="studio-task-live">
+                        <span />
+                        Executive is working
+                      </div>
+                    )}
+
+                    {selectedTask.result?.result && (
+                      <>
+                        <section>
+                          <small>RESULT</small>
+
+                          <p>
+                            {
+                              selectedTask
+                                .result
+                                .result
+                                .assessment
+                            }
+                          </p>
+                        </section>
+
+                        {(selectedTask
+                          .result
+                          .result
+                          .recommendations
+                          ?.length ??
+                          0) > 0 && (
+                          <section>
+                            <small>
+                              RECOMMENDATIONS
+                            </small>
+
+                            <ul>
+                              {
+                                selectedTask
+                                  .result
+                                  .result
+                                  .recommendations
+                                  ?.map(
+                                    (item) => (
+                                      <li key={item}>
+                                        {item}
+                                      </li>
+                                    ),
+                                  )
+                              }
+                            </ul>
+                          </section>
+                        )}
+
+                        {(selectedTask
+                          .result
+                          .result
+                          .risks
+                          ?.length ??
+                          0) > 0 && (
+                          <section>
+                            <small>RISKS</small>
+
+                            <ul>
+                              {
+                                selectedTask
+                                  .result
+                                  .result
+                                  .risks
+                                  ?.map(
+                                    (item) => (
+                                      <li key={item}>
+                                        {item}
+                                      </li>
+                                    ),
+                                  )
+                              }
+                            </ul>
+                          </section>
+                        )}
+                      </>
+                    )}
+
+                    {selectedTask.last_error && (
+                      <section>
+                        <small>ERROR</small>
+
+                        <p>
+                          {selectedTask.last_error}
+                        </p>
+                      </section>
+                    )}
+
+                    <button
+                      type="button"
+                      className="studio-task-back"
+                      onClick={() =>
+                        setSelectedTask(null)
+                      }
+                    >
+                      ← Back to Tasks
+                    </button>
+                  </div>
+                ) : (
+                  <div className="studio-task-list">
+                    {tasks
+                      .filter((task) => {
+                        if (
+                          taskCenterTab === 'live'
+                        ) {
+                          return (
+                            task.status === 'queued' ||
+                            task.status === 'running'
+                          )
+                        }
+
+                        if (
+                          taskCenterTab === 'done'
+                        ) {
+                          return (
+                            task.status === 'completed'
+                          )
+                        }
+
+                        return (
+                          task.status === 'failed' ||
+                          task.status ===
+                            'need_attention'
+                        )
+                      })
+                      .length === 0 ? (
+                      <div className="studio-task-empty">
+                        {
+                          taskCenterTab === 'live'
+                            ? 'No active tasks.'
+                            : taskCenterTab === 'done'
+                              ? 'No completed tasks yet.'
+                              : 'Nothing needs your attention.'
+                        }
+                      </div>
+                    ) : (
+                      tasks
+                        .filter((task) => {
+                          if (
+                            taskCenterTab === 'live'
+                          ) {
+                            return (
+                              task.status === 'queued' ||
+                              task.status === 'running'
+                            )
+                          }
+
+                          if (
+                            taskCenterTab === 'done'
+                          ) {
+                            return (
+                              task.status === 'completed'
+                            )
+                          }
+
+                          return (
+                            task.status === 'failed' ||
+                            task.status ===
+                              'need_attention'
+                          )
+                        })
+                        .map((task) => (
+                          <button
+                            type="button"
+                            key={task.task_id}
+                            className="studio-task-row"
+                            onClick={() =>
+                              setSelectedTask(task)
+                            }
+                          >
+                            <span className="studio-task-row-copy">
+                              <strong>
+                                {
+                                  taskDisplayTitle(
+                                    task.title,
+                                  )
+                                }
+                              </strong>
+
+                              <small>
+                                {task.assigned_to}
+                                {' · '}
+                                {task.task_id}
+                              </small>
+                            </span>
+
+                            <span
+                              className={`studio-task-status is-${task.status}`}
+                            >
+                              {task.status}
+                            </span>
+                          </button>
+                        ))
+                    )}
+                  </div>
+                )}
+              </section>
+            </div>
+          )}
 
           <div className="studio-canvas-controls">
             <button
@@ -1995,8 +2798,10 @@ export default function WorkflowStudio({
 
               {ROLES.map((role) => {
                 const onCanvas = executiveRoles.includes(role)
-                // No Rust/Modal task receipts yet: On Duty must NOT be invented.
-                const status = resolveExecutiveStatus(onCanvas, false)
+                const status = resolveExecutiveStatus(
+                  onCanvas,
+                  activeExecutives.includes(role),
+                )
 
                 return (
                 <div

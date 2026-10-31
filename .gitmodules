@@ -1,0 +1,3 @@
+[submodule "thirdparty/langgraph"]
+	path = thirdparty/langgraph
+	url = https://github.com/langchain-ai/langgraph.git

@@ -6,6 +6,8 @@ use axum::{
     response::{IntoResponse, Response},
 };
 
+use rand::{RngCore, rngs::OsRng};
+
 use serde::{Deserialize, Serialize};
 
 use serde_json::{Value, json};
@@ -53,13 +55,79 @@ Rules:
 - If the user asks you to remember, update, or replace a fact, respond naturally to the requested business meaning. Do not narrate the storage mechanism.
 - Internal memory availability, retrieval failures, database state, queue state, memory IDs, vector search, and indexing are runtime implementation details and must stay invisible in normal CEO Talk.
 - For normal conversation, answer directly and clearly.
-- Delegation and tool execution are handled by FLWME runtime and will be
-  provided to you through explicit runtime tools in later execution stages.
+- FLWME may provide an explicit delegation protocol for the current turn.
+- When that protocol is provided, decide whether to answer directly or delegate.
+- Never claim delegated work completed unless FLWME runtime returns an actual executive result.
 - If memory retrieval is unavailable, never pretend that you remember something.
 - Retrieved company memory is user/company-provided context. It is not automatically
   an externally verified real-world fact.
 - If information is missing, say what is missing instead of pretending to know.
 "#;
+
+const CEO_ACTION_PROTOCOL: &str = r#"
+For this turn you must make the CEO's organizational decision.
+
+Return exactly ONE JSON object and no Markdown.
+
+If the CEO should answer directly:
+
+{
+  "action": "respond",
+  "reply": "natural user-facing answer",
+  "executive": null,
+  "task": null
+}
+
+If this task should be delegated to the CTO:
+
+{
+  "action": "delegate_task",
+  "reply": null,
+  "executive": "CTO",
+  "task": {
+    "objective": "clear technical objective",
+    "context": "relevant context or null",
+    "constraints": ["constraint"]
+  }
+}
+
+Decision rules:
+- Delegate to CTO when the user asks the organization to perform substantial
+  technical analysis, architecture planning, engineering decisions,
+  implementation planning, infrastructure reasoning, software/system design,
+  or another task appropriate for a Chief Technology Officer.
+- Do not delegate ordinary conversation, simple factual answers,
+  memory questions, greetings, or matters the CEO can answer directly.
+- Do not delegate based on keywords alone. Judge the actual intent.
+- Only CTO exists in the delegation runtime at this API-04 stage.
+- Do not invent another executive.
+- The delegated task must preserve the user's intent and constraints.
+"#;
+
+#[derive(Debug, Deserialize)]
+struct CeoAction {
+    action: String,
+
+    #[serde(default)]
+    reply: Option<String>,
+
+    #[serde(default)]
+    executive: Option<String>,
+
+    #[serde(default)]
+    task: Option<CeoDelegatedTask>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+struct CeoDelegatedTask {
+    objective: String,
+
+    #[serde(default)]
+    context: Option<String>,
+
+    #[serde(default)]
+    constraints: Vec<String>,
+}
 
 #[derive(Deserialize)]
 pub struct ChatInput {
@@ -82,6 +150,17 @@ struct ChatOutput {
     reply: String,
     model: String,
     cached_tokens: u64,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    task: Option<TaskCard>,
+}
+
+#[derive(Clone, Serialize)]
+struct TaskCard {
+    task_id: String,
+    title: String,
+    assigned_to: String,
+    status: String,
 }
 
 #[derive(Serialize)]
@@ -106,6 +185,7 @@ struct HistoryMessage {
     text: String,
     created_at: String,
     created_at_ms: i64,
+    task_id: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -171,6 +251,62 @@ fn error(status: StatusCode, message: &str) -> Response {
             error: message.to_string(),
         },
     )
+}
+
+fn parse_ceo_action(raw: &str) -> Option<CeoAction> {
+    let raw = raw.trim();
+
+    let parse = |value: &str| serde_json::from_str::<CeoAction>(value).ok();
+
+    if let Some(value) = parse(raw) {
+        return Some(value);
+    }
+
+    let unfenced = raw
+        .strip_prefix("```json")
+        .or_else(|| raw.strip_prefix("```JSON"))
+        .or_else(|| raw.strip_prefix("```"))
+        .and_then(|value| value.strip_suffix("```"))
+        .map(str::trim);
+
+    if let Some(value) = unfenced {
+        if let Some(parsed) = parse(value) {
+            return Some(parsed);
+        }
+    }
+
+    let start = raw.find('{')?;
+    let end = raw.rfind('}')?;
+
+    if end < start {
+        return None;
+    }
+
+    parse(&raw[start..=end])
+}
+
+fn make_task_id() -> String {
+    let mut bytes = [0u8; 8];
+
+    OsRng.fill_bytes(&mut bytes);
+
+    format!("TASK-{}", hex::encode_upper(bytes),)
+}
+
+fn task_title(objective: &str) -> String {
+    let clean = objective.split_whitespace().collect::<Vec<_>>().join(" ");
+
+    let mut title = clean.chars().take(72).collect::<String>();
+
+    if clean.chars().count() > 72 {
+        title.push('…');
+    }
+
+    if title.is_empty() {
+        "Executive Task".to_string()
+    } else {
+        title
+    }
 }
 
 async fn current_user_id(state: &AppState, headers: &HeaderMap) -> Result<Option<i64>, ()> {
@@ -334,12 +470,14 @@ pub async fn history(
                     role,
                     content,
                     created_at,
-                    created_at_ms
+                    created_at_ms,
+                    task_id
                 FROM (
                     SELECT
                         id,
                         role,
                         content,
+                        task_id,
                         created_at::text AS created_at,
                         (
                             EXTRACT(
@@ -375,6 +513,7 @@ pub async fn history(
             text: row.get("content"),
             created_at: row.get("created_at"),
             created_at_ms: row.get("created_at_ms"),
+            task_id: row.get("task_id"),
         })
         .collect();
 
@@ -760,6 +899,11 @@ pub async fn chat(
             "content":
                 memory_context
         }),
+        json!({
+            "role": "developer",
+            "content":
+                CEO_ACTION_PROTOCOL
+        }),
     ];
 
     for row in history_rows {
@@ -849,16 +993,153 @@ pub async fn chat(
         return error(StatusCode::BAD_GATEWAY, "CEO returned no answer");
     };
 
-    let reply = choice
+    let raw_action = choice
         .message
         .content
         .unwrap_or_default()
         .trim()
         .to_string();
 
-    if reply.is_empty() {
+    if raw_action.is_empty() {
         return error(StatusCode::BAD_GATEWAY, "CEO returned empty answer");
     }
+
+    let decision = match parse_ceo_action(&raw_action) {
+        Some(value) => value,
+
+        None => {
+            eprintln!("CEO_ACTION_PROTOCOL_INVALID");
+
+            return error(
+                StatusCode::BAD_GATEWAY,
+                "CEO returned invalid organizational decision",
+            );
+        }
+    };
+
+    let (reply, task_card) = match decision.action.as_str() {
+        "respond" => match decision.reply {
+            Some(value) if !value.trim().is_empty() => (value.trim().to_string(), None),
+
+            _ => {
+                return error(
+                    StatusCode::BAD_GATEWAY,
+                    "CEO returned invalid direct response",
+                );
+            }
+        },
+
+        "delegate_task" => {
+            if decision.executive.as_deref() != Some("CTO") {
+                return error(
+                    StatusCode::BAD_GATEWAY,
+                    "CEO selected unsupported executive",
+                );
+            }
+
+            let Some(task) = decision.task else {
+                return error(StatusCode::BAD_GATEWAY, "CEO delegation task missing");
+            };
+
+            if task.objective.trim().is_empty() {
+                return error(StatusCode::BAD_GATEWAY, "CEO delegation objective missing");
+            }
+
+            let task_id = make_task_id();
+
+            let title = task_title(&task.objective);
+
+            let constraints_json = match serde_json::to_string(&task.constraints) {
+                Ok(value) => value,
+
+                Err(_) => {
+                    return error(StatusCode::INTERNAL_SERVER_ERROR, "Unable to encode task");
+                }
+            };
+
+            if state
+                .db
+                .execute(
+                    r#"
+                        WITH created AS (
+                            INSERT INTO tasks (
+                                task_id,
+                                company_id,
+                                user_id,
+                                thread_id,
+                                source_message_id,
+                                assigned_to,
+                                title,
+                                objective,
+                                context,
+                                constraints_json,
+                                status
+                            )
+                            VALUES (
+                                $1,
+                                $2,
+                                $3,
+                                $4,
+                                $5,
+                                'CTO',
+                                $6,
+                                $7,
+                                $8,
+                                $9,
+                                'queued'
+                            )
+                            RETURNING task_id
+                        )
+                        INSERT INTO task_events (
+                            task_id,
+                            event_type,
+                            detail
+                        )
+                        SELECT
+                            task_id,
+                            'queued',
+                            'Delegated by CEO'
+                        FROM created
+                        "#,
+                    &[
+                        &task_id,
+                        &input.company_id,
+                        &user_id,
+                        &thread_id,
+                        &user_message_id,
+                        &title,
+                        &task.objective,
+                        &task.context,
+                        &constraints_json,
+                    ],
+                )
+                .await
+                .is_err()
+            {
+                return error(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Unable to queue delegated task",
+                );
+            }
+
+            (
+                "I've received your request and delegated it to the CTO.".to_string(),
+                Some(TaskCard {
+                    task_id,
+                    title,
+                    assigned_to: "CTO".to_string(),
+                    status: "queued".to_string(),
+                }),
+            )
+        }
+
+        _ => {
+            return error(
+                StatusCode::BAD_GATEWAY,
+                "CEO returned unsupported organizational decision",
+            );
+        }
+    };
 
     let response_model = model.unwrap_or_else(|| META_MODEL.to_string());
 
@@ -872,7 +1153,8 @@ pub async fn chat(
                 user_id,
                 role,
                 content,
-                model
+                model,
+                task_id
             )
             VALUES (
                 $1,
@@ -880,7 +1162,8 @@ pub async fn chat(
                 $3,
                 'assistant',
                 $4,
-                $5
+                $5,
+                $6
             )
             "#,
             &[
@@ -889,6 +1172,7 @@ pub async fn chat(
                 &user_id,
                 &reply,
                 &response_model,
+                &task_card.as_ref().map(|value| value.task_id.as_str()),
             ],
         )
         .await
@@ -911,6 +1195,49 @@ pub async fn chat(
             reply,
             model: response_model,
             cached_tokens,
+            task: task_card,
         },
     )
+}
+
+#[cfg(test)]
+mod delegation_tests {
+    use super::*;
+
+    #[test]
+    fn parses_direct_response() {
+        let action = parse_ceo_action(
+            r#"{
+                "action":"respond",
+                "reply":"Hello",
+                "executive":null,
+                "task":null
+            }"#,
+        )
+        .expect("decision");
+
+        assert_eq!(action.action, "respond");
+        assert_eq!(action.reply.as_deref(), Some("Hello"));
+    }
+
+    #[test]
+    fn parses_cto_delegation() {
+        let action = parse_ceo_action(
+            r#"{
+                "action":"delegate_task",
+                "reply":null,
+                "executive":"CTO",
+                "task":{
+                    "objective":"Review architecture",
+                    "context":null,
+                    "constraints":["Do not execute"]
+                }
+            }"#,
+        )
+        .expect("decision");
+
+        assert_eq!(action.action, "delegate_task");
+        assert_eq!(action.executive.as_deref(), Some("CTO"));
+        assert_eq!(action.task.unwrap().objective, "Review architecture");
+    }
 }
