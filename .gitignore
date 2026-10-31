@@ -1,0 +1,16 @@
+# Build outputs
+frontend/node_modules/
+frontend/dist/
+backend/target/
+# Secrets and local config
+.env
+.env.*
+*.pem
+*.key
+# OS / editor
+.DS_Store
+.vscode/
+.idea/
+# Local backups and debug outputs
+*.bak
+*.tmp

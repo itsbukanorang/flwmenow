@@ -1,0 +1,40 @@
+/* New page styling only; original login visual is maintained in App.css. */
+.login-card .form-field:last-of-type { margin-bottom: 28px; }
+.register-line a {
+  color: #fff;
+  font-weight: 700;
+  text-decoration: none;
+}
+.register-line a:hover { color: #64efff; }
+.register-line a:focus-visible { outline: 2px solid #54eaff; outline-offset: 3px; }
+.form-error { color: #ffd0d0; }
+.login-button:disabled { opacity: .65; cursor: wait; transform: none; }
+.dashboard-screen {
+  min-height: 100svh;
+  background: #020812;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  color: #fff;
+  padding: 20px;
+}
+.dashboard-content {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 25px;
+}
+.dashboard-content h1 { margin: 0; font-size: 32px; line-height: 1.2; }
+.dashboard-content button {
+  padding: 11px 20px;
+  border-radius: 9px;
+  border: 1px solid #69dfff;
+  color: #fff;
+  background: #153349;
+  cursor: pointer;
+  font-size: 15px;
+}
+.dashboard-content button:hover { background: #205575; }
+.dashboard-content button:focus-visible { outline: 2px solid #54eaff; outline-offset: 3px; }
+.dashboard-content button:disabled { opacity: .6; cursor: wait; }

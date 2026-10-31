@@ -1,0 +1,352 @@
+.auth-page {
+  position: relative;
+  isolation: isolate;
+  display: grid;
+  place-items: center;
+  min-height: 100svh;
+  padding: 90px 20px;
+  overflow: hidden;
+  background:
+    radial-gradient(ellipse 46% 70% at 50% 70%,
+      rgba(0, 133, 199, 0.29), transparent 76%),
+    linear-gradient(90deg, #00050c, #061120 50%, #00050b);
+}
+
+.light-stage {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.ambient-glow {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(ellipse 30% 43% at 50% 72%,
+      rgba(0, 192, 255, 0.45), transparent 100%),
+    repeating-linear-gradient(
+      90deg,
+      transparent 0,
+      rgba(0, 145, 255, 0.025) 22px,
+      transparent 70px
+    );
+}
+
+.light-beam {
+  position: absolute;
+  bottom: 25%;
+  background: linear-gradient(
+    to top,
+    #32eaff 0%,
+    rgba(0, 184, 255, 0.7) 18%,
+    rgba(0, 92, 165, 0.18) 73%,
+    transparent 100%
+  );
+  box-shadow: 0 0 13px 2px rgba(0, 187, 255, 0.45);
+  filter: blur(0.5px);
+  animation: beam-pulse 5s ease-in-out infinite alternate;
+}
+
+.horizon {
+  position: absolute;
+  left: 15%;
+  right: 15%;
+  bottom: 24.5%;
+  height: 2px;
+  background: #3bedff;
+  box-shadow:
+    0 0 12px 4px rgba(0, 221, 255, 0.9),
+    0 0 55px 15px rgba(0, 157, 255, 0.4);
+}
+
+.floor-grid {
+  position: absolute;
+  left: -25%;
+  width: 150%;
+  height: 54%;
+  bottom: -31%;
+  transform: perspective(700px) rotateX(59deg);
+  transform-origin: center top;
+  background-image:
+    repeating-linear-gradient(
+      90deg,
+      transparent 0 92px,
+      rgba(33, 160, 215, 0.19) 93px,
+      transparent 95px
+    ),
+    repeating-linear-gradient(
+      0deg,
+      transparent 0 42px,
+      rgba(30, 158, 214, 0.17) 43px,
+      transparent 45px
+    );
+  background-color: rgba(3, 19, 32, 0.7);
+  mask-image: linear-gradient(to bottom, #000 15%, transparent 100%);
+}
+
+.floor-ray {
+  position: absolute;
+  bottom: 24%;
+  width: 65%;
+  height: 3px;
+  background: #27efff;
+  box-shadow:
+    0 0 8px 3px rgba(0, 226, 255, 0.9),
+    0 0 34px 11px rgba(0, 144, 255, 0.45);
+}
+
+.floor-ray-left {
+  left: -11%;
+  transform-origin: right center;
+  transform: rotate(-8deg);
+}
+
+.floor-ray-right {
+  right: -11%;
+  transform-origin: left center;
+  transform: rotate(8deg);
+}
+
+.brand-plate {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 3;
+  width: 330px;
+  height: 230px;
+  background: #0c1e32;
+  clip-path: polygon(0 0, 100% 0, 0 100%);
+}
+
+.brand-name {
+  position: absolute;
+  top: 38px;
+  left: 35px;
+  color: #fff;
+  font-size: 35px;
+  font-weight: 850;
+  letter-spacing: -2px;
+}
+
+.brand-name span {
+  color: #15dbff;
+}
+
+.login-card {
+  position: relative;
+  z-index: 2;
+  width: min(100%, 388px);
+  padding: 38px 37px 49px;
+  border: 1px solid rgba(220, 247, 255, 0.23);
+  border-radius: 11px;
+  background: linear-gradient(
+    180deg,
+    rgba(3, 11, 24, 0.82) 0%,
+    rgba(6, 32, 49, 0.78) 51%,
+    rgba(5, 169, 215, 0.48) 100%
+  );
+  box-shadow:
+    0 20px 65px rgba(0, 0, 0, 0.3),
+    inset 0 1px rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+}
+
+.login-card h1 {
+  margin: 0 0 32px;
+  color: #fff;
+  font-size: 34px;
+  font-weight: 750;
+  line-height: 1.3;
+  text-align: center;
+  letter-spacing: -1px;
+}
+
+.form-field {
+  position: relative;
+  margin-bottom: 27px;
+}
+
+.form-field input {
+  display: block;
+  width: 100%;
+  height: 46px;
+  padding: 0 43px 0 19px;
+  border: 1px solid rgba(215, 240, 255, 0.25);
+  border-radius: 30px;
+  outline: none;
+  background: rgba(3, 16, 31, 0.25);
+  color: #fff;
+  font: inherit;
+  font-size: 14px;
+  transition: border-color 180ms, box-shadow 180ms;
+}
+
+.form-field input::placeholder {
+  color: #fff;
+  opacity: 0.96;
+}
+
+.form-field input:focus {
+  border-color: #37dfff;
+  box-shadow: 0 0 0 3px rgba(0, 215, 255, 0.13);
+}
+
+.form-field svg {
+  position: absolute;
+  right: 18px;
+  top: 50%;
+  width: 17px;
+  height: 17px;
+  transform: translateY(-50%);
+  fill: currentColor;
+  color: #fff;
+  pointer-events: none;
+}
+
+.form-options {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  margin: -10px 0 19px;
+  font-size: 13px;
+}
+
+.remember {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.remember input {
+  width: 13px;
+  height: 13px;
+  margin: 0;
+  accent-color: #22d8f5;
+}
+
+.text-button,
+.register-line button {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: #fff;
+  font: inherit;
+  cursor: pointer;
+}
+
+.text-button:hover,
+.register-line button:hover {
+  color: #64efff;
+}
+
+.login-button {
+  width: 100%;
+  min-height: 43px;
+  border: none;
+  border-radius: 30px;
+  background: #fff;
+  color: #171717;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 550;
+  cursor: pointer;
+  transition: transform 180ms, box-shadow 180ms;
+}
+
+.login-button:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 7px 25px rgba(0, 219, 255, 0.25);
+}
+
+.login-button:active {
+  transform: translateY(0);
+}
+
+.register-line {
+  margin: 20px 0 0;
+  text-align: center;
+  font-size: 13px;
+}
+
+.register-line button {
+  font-weight: 700;
+}
+
+.form-notice {
+  margin-top: 17px;
+  color: #e1fbff;
+  font-size: 12px;
+  line-height: 1.5;
+  text-align: center;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+button:focus-visible,
+.remember input:focus-visible {
+  outline: 2px solid #54eaff;
+  outline-offset: 4px;
+}
+
+@keyframes beam-pulse {
+  from { filter: brightness(0.7) blur(0.5px); }
+  to { filter: brightness(1.25) blur(0.5px); }
+}
+
+@media (max-width: 600px) {
+  .auth-page {
+    padding: 145px 18px 55px;
+  }
+
+  .brand-plate {
+    width: 210px;
+    height: 145px;
+  }
+
+  .brand-name {
+    top: 27px;
+    left: 22px;
+    font-size: 26px;
+  }
+
+  .login-card {
+    padding: 35px 25px 40px;
+  }
+
+  .login-card h1 {
+    font-size: 30px;
+  }
+
+  .form-options {
+    font-size: 12px;
+  }
+
+  .light-beam {
+    opacity: 0.4 !important;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
