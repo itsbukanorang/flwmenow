@@ -28,7 +28,7 @@ export default function AuthLayout({ title, children }: { title: string; childre
       </div>
       <div className="brand-plate">
         <img
-          src="/assets/flwme-logo.png"
+          src="/assets/flwmelogo.png"
           alt="FLWME"
           className="auth-brand-logo"
         />

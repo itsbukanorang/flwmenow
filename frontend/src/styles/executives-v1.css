@@ -1,0 +1,314 @@
+/* FLWME Executive Canvas V1 */
+
+.studio-exec-node.studio-worker-node {
+  z-index: 3;
+  border-color: rgba(109, 224, 255, .34);
+  background: linear-gradient(
+    145deg,
+    rgba(12, 57, 87, .97),
+    rgba(6, 33, 58, .96)
+  );
+}
+
+.studio-exec-icon.studio-worker-icon {
+  color: #a9eeff;
+  background: rgba(45, 159, 204, .13);
+}
+
+.studio-exec-icon strong {
+  font-size: 11px;
+  font-weight: 750;
+  letter-spacing: -.02em;
+}
+
+.studio-exec-buttons {
+  position: absolute;
+  right: -9px;
+  top: -13px;
+  display: flex;
+  gap: 4px;
+}
+
+.studio-exec-buttons button {
+  width: 23px;
+  height: 23px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(131, 219, 255, .33);
+  border-radius: 50%;
+  color: #d8f7ff;
+  background: #153b59;
+  cursor: pointer;
+}
+
+.studio-exec-buttons button:hover {
+  background: #245a79;
+  border-color: #a6ecff;
+}
+
+.studio-exec-description {
+  margin: 4px 0 16px;
+  color: rgba(236, 248, 255, .66);
+  font-size: 11px;
+}
+
+.studio-exec-options {
+  display: grid;
+  gap: 8px;
+}
+
+.studio-exec-options button {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 11px;
+  border: 1px solid rgba(140, 223, 255, .18);
+  border-radius: 9px;
+  color: #fff;
+  background: rgba(37, 126, 177, .11);
+  cursor: pointer;
+}
+
+.studio-exec-options button:hover {
+  background: rgba(37, 126, 177, .23);
+}
+
+.studio-exec-options button strong {
+  font-size: 12px;
+}
+
+.studio-exec-options button span {
+  flex: 1;
+  text-align: left;
+  color: rgba(235, 247, 255, .65);
+  font-size: 10px;
+}
+
+.studio-exec-options button em {
+  font-size: 10px;
+  color: #a8eaff;
+  font-style: normal;
+}
+
+.studio-exec-restore {
+  width: 100%;
+  margin-top: 12px;
+  padding: 9px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 7px;
+  border: 1px dashed rgba(122, 220, 255, .3);
+  border-radius: 9px;
+  color: #9beaff;
+  background: rgba(37, 126, 177, .07);
+  font-size: 10px;
+  cursor: pointer;
+}
+
+
+/* EXECUTIVE_V11_BUTTON_FIX */
+
+.studio-exec-node {
+  cursor: grab;
+  touch-action: none;
+}
+
+.studio-exec-node:active {
+  cursor: grabbing;
+}
+
+.studio-exec-buttons {
+  position: absolute;
+  top: -15px;
+  right: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  z-index: 5;
+}
+
+.studio-exec-buttons button {
+  box-sizing: border-box;
+  appearance: none;
+  flex: 0 0 27px;
+  width: 27px;
+  height: 27px;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(112, 223, 255, .46);
+  border-radius: 50%;
+  color: #a5eeff;
+  background: #103d59;
+  line-height: 0;
+  cursor: pointer;
+}
+
+.studio-exec-buttons button svg {
+  display: block;
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  padding: 0;
+  stroke-width: 2.3;
+}
+
+.studio-exec-buttons button:hover {
+  background: #18577a;
+}
+
+.studio-exec-buttons button:nth-child(2) {
+  color: #ff8795;
+  border-color: rgba(255, 113, 133, .48);
+  background: #452430;
+}
+
+.studio-exec-buttons button:nth-child(2):hover {
+  color: #fff0f2;
+  border-color: #ff8795;
+  background: #793044;
+}
+
+.studio-exec-buttons button:focus-visible {
+  outline: 2px solid #9feaff;
+  outline-offset: 3px;
+}
+
+
+/* Executive Canvas V1.2: compact nodes, minimal controls and permanent catalog. */
+.studio-scene .studio-ceo-node {
+  box-sizing: border-box;
+  width: 178px !important;
+  min-height: 68px !important;
+  grid-template-columns: 42px minmax(0,1fr) !important;
+  gap: 8px !important;
+  padding: 8px 10px !important;
+}
+.studio-scene .studio-ceo-node .studio-node-icon {
+  width: 42px !important;
+  height: 42px !important;
+}
+.studio-scene .studio-exec-node.studio-worker-node {
+  width: 178px !important;
+  min-height: 68px !important;
+  grid-template-columns: 34px minmax(0,1fr) !important;
+  gap: 8px !important;
+  padding: 8px 9px !important;
+  border-radius: 10px;
+}
+.studio-scene .studio-exec-node .studio-worker-icon {
+  width: 34px !important;
+  height: 34px !important;
+  border-radius: 8px !important;
+}
+.studio-scene .studio-exec-node .studio-node-copy {
+  padding-right: 40px;
+}
+.studio-scene .studio-exec-node .studio-node-copy strong { font-size: 11px; }
+.studio-scene .studio-exec-node .studio-node-copy span { font-size: 8px; }
+.studio-scene .studio-exec-node .studio-exec-buttons {
+  position: absolute;
+  top: 8px;
+  right: 7px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  z-index: 5;
+}
+.studio-scene .studio-exec-node .studio-exec-buttons button {
+  flex: 0 0 21px;
+  width: 21px;
+  height: 21px;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  place-items: center;
+  border-radius: 7px;
+  color: #8fe7ff;
+  border: 1px solid rgba(111,213,251,.29);
+  background: rgba(12,65,94,.82);
+  line-height: 0;
+}
+.studio-scene .studio-exec-node .studio-exec-buttons button svg {
+  width: 12px; height: 12px; display: block; margin: 0; padding: 0;
+}
+.studio-scene .studio-exec-node .studio-exec-buttons button:nth-child(2) {
+  color: #ff8e9b;
+  border-color: rgba(255,110,131,.33);
+  background: rgba(101,32,49,.54);
+}
+.studio-exec-catalog-card {
+  cursor: grab;
+  user-select: none;
+  border-color: rgba(135,222,255,.17);
+}
+.studio-exec-catalog-card:hover {
+  border-color: rgba(135,222,255,.42);
+  background: rgba(58,159,204,.13);
+}
+.studio-exec-catalog-card:active { cursor: grabbing; }
+.studio-exec-catalog-status {
+  margin-left: auto;
+  white-space: nowrap;
+  color: #8be3ff !important;
+  font-size: 8px !important;
+}
+
+
+/* Executive Status V1.3 */
+/* Compact accessible chips */
+.studio-exec-catalog-card .studio-exec-catalog-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: auto;
+  padding: 4px 7px;
+  min-height: 20px;
+  flex: none;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  font-size: 9px !important;
+  font-weight: 650;
+  white-space: nowrap;
+  line-height: 1;
+}
+.studio-exec-catalog-card .studio-exec-catalog-status.is-standby {
+  color: #79efae !important;
+  border-color: rgba(89, 225, 149, .28);
+  background: rgba(36, 144, 87, .15);
+}
+.studio-exec-catalog-card .studio-exec-catalog-status.is-on-duty {
+  color: #91e7ff !important;
+  border-color: rgba(99, 203, 255, .30);
+  background: rgba(32, 130, 183, .17);
+}
+.studio-exec-catalog-card .studio-exec-catalog-status.is-on-leave {
+  color: #cfb9a0 !important;
+  border-color: rgba(205, 172, 135, .22);
+  background: rgba(130, 101, 75, .12);
+}
+
+
+/* Executive PNG Assets V1.4 */
+.studio-scene .studio-exec-node .studio-exec-icon {
+  overflow: hidden;
+  padding: 2px !important;
+}
+.studio-scene .studio-exec-node .studio-exec-icon img,
+.studio-exec-catalog-card .studio-team-avatar img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  pointer-events: none;
+  user-select: none;
+}
+.studio-exec-catalog-card .studio-team-avatar {
+  overflow: hidden;
+  padding: 3px;
+  flex: none;
+}

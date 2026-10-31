@@ -20,6 +20,7 @@ import {
 } from 'lucide-react'
 
 import type { Company } from '../lib/companies'
+import '../styles/executives-v1.css'
 
 type Props = {
   company: Company | null
@@ -31,9 +32,48 @@ type Point = {
   y: number
 }
 
+type ExecutiveRole = 'CTO' | 'CFO' | 'CMO' | 'COO'
+
+const ROLES: ExecutiveRole[] = ['CTO', 'CFO', 'CMO', 'COO']
+
+const ROLE_NAMES: Record<ExecutiveRole, string> = {
+  CTO: 'Technology',
+  CFO: 'Finance',
+  CMO: 'Marketing',
+  COO: 'Operations',
+}
+
+type ExecutiveStatus = 'On Duty' | 'Standby' | 'On Leave'
+
+function resolveExecutiveStatus(
+  onCanvas: boolean,
+  verifiedExecutionRunning: boolean,
+): ExecutiveStatus {
+  if (!onCanvas) return 'On Leave'
+  if (verifiedExecutionRunning) return 'On Duty'
+  return 'Standby'
+}
+
+function loadRoles(companyId?: number): ExecutiveRole[] {
+  if (companyId === undefined) return [...ROLES]
+
+  try {
+    const raw = localStorage.getItem(`flwme:executives:${companyId}`)
+    if (raw === null) return [...ROLES]
+
+    const value: unknown = JSON.parse(raw)
+    if (!Array.isArray(value)) return [...ROLES]
+
+    return ROLES.filter((role) => value.includes(role))
+  } catch {
+    return [...ROLES]
+  }
+}
+
 type WorkerNode = Point & {
   id: number
   name: string
+  owner: ExecutiveRole
 }
 
 type DragState =
@@ -52,6 +92,19 @@ type DragState =
       originY: number
     }
   | {
+      type: 'executive'
+      role: ExecutiveRole
+      startX: number
+      startY: number
+      originX: number
+      originY: number
+      workersAtStart: Array<{
+        id: number
+        x: number
+        y: number
+      }>
+    }
+  | {
       type: 'worker'
       workerId: number
       startX: number
@@ -61,14 +114,17 @@ type DragState =
     }
   | null
 
-const CEO_WIDTH = 226
-const CEO_HEIGHT = 90
+const CEO_WIDTH = 178
+const CEO_HEIGHT = 68
 const WORKER_WIDTH = 188
 const WORKER_HEIGHT = 66
+const EXEC_HEIGHT = 68
 
 function connectorPath(
   from: Point,
   to: Point,
+  sourceWidth = CEO_WIDTH,
+  sourceHeight = CEO_HEIGHT,
 ) {
   const dx = to.x - from.x
   const dy = to.y - from.y
@@ -78,7 +134,7 @@ function connectorPath(
 
     const sx =
       from.x +
-      direction * CEO_WIDTH / 2
+      direction * sourceWidth / 2
 
     const sy = from.y
 
@@ -106,7 +162,7 @@ function connectorPath(
   const sx = from.x
   const sy =
     from.y +
-    direction * CEO_HEIGHT / 2
+    direction * sourceHeight / 2
 
   const tx = to.x
   const ty =
@@ -135,7 +191,7 @@ export default function WorkflowStudio({
   const talkTextareaRef = useRef<HTMLTextAreaElement>(null)
   const attachmentInputRef = useRef<HTMLInputElement>(null)
 
-  const [zoom, setZoom] = useState(1)
+  const [zoom, setZoom] = useState(0.8)
 
   const [pan, setPan] =
     useState<Point>({
@@ -145,8 +201,8 @@ export default function WorkflowStudio({
 
   const [ceoPosition, setCeoPosition] =
     useState<Point>({
-      x: -120,
-      y: -90,
+      x: 0,
+      y: -140,
     })
 
   const [workers, setWorkers] =
@@ -166,6 +222,68 @@ export default function WorkflowStudio({
 
   const [talkNotice, setTalkNotice] =
     useState('')
+
+  const [executiveRoles, setExecutiveRoles] =
+    useState<ExecutiveRole[]>(() => loadRoles(company?.id))
+
+  const [manageExecutivesOpen, setManageExecutivesOpen] =
+    useState(false)
+
+  const [workerOwner, setWorkerOwner] =
+    useState<ExecutiveRole | null>(null)
+
+  const [executiveOverrides, setExecutiveOverrides] =
+    useState<Partial<Record<ExecutiveRole, Point>>>({})
+
+  useEffect(() => {
+    setExecutiveRoles(loadRoles(company?.id))
+    setWorkers([])
+    setManageExecutivesOpen(false)
+    setExecutiveOverrides({})
+  }, [company?.id])
+
+  const executivePoint = (role: ExecutiveRole): Point => {
+    const override = executiveOverrides[role]
+    if (override) return override
+
+    const index = ROLES.indexOf(role)
+    const compact = window.innerWidth <= 820
+
+    return {
+      x: ceoPosition.x +
+        (compact
+          ? (index % 2 === 0 ? -120 : 120)
+          : (index - 1.5) * 215),
+      y: ceoPosition.y +
+        (compact
+          ? 155 + Math.floor(index / 2) * 115
+          : 195),
+    }
+  }
+
+  const toggleExecutive = (role: ExecutiveRole) => {
+    if (!company) return
+
+    const removing = executiveRoles.includes(role)
+
+    const next = ROLES.filter((item) =>
+      item === role
+        ? !removing
+        : executiveRoles.includes(item),
+    )
+
+    try {
+      localStorage.setItem(
+        `flwme:executives:${company.id}`,
+        JSON.stringify(next),
+      )
+    } catch {
+      setTalkNotice('Unable to save Executive changes.')
+      return
+    }
+
+    setExecutiveRoles(next)
+  }
 
   const [attachments, setAttachments] =
     useState<File[]>([])
@@ -243,15 +361,14 @@ export default function WorkflowStudio({
   }
 
   const resetCanvas = () => {
-    setZoom(1)
+    setZoom(0.8)
     setPan({ x: 0, y: 0 })
-    setCeoPosition({
-      x: -120,
-      y: -90,
-    })
+    setCeoPosition({ x: 0, y: -140 })
+    setExecutiveOverrides({})
   }
 
-  const openAddWorker = () => {
+  const openAddWorker = (role: ExecutiveRole) => {
+    setWorkerOwner(role)
     setWorkerName('')
     setAddWorkerOpen(true)
   }
@@ -263,26 +380,29 @@ export default function WorkflowStudio({
 
     const clean = workerName.trim()
 
-    if (!clean) return
+    if (!clean || !workerOwner ||
+      !executiveRoles.includes(workerOwner)) return
 
-    const index = workers.length
+    const index = workers.filter(
+      (worker) => worker.owner === workerOwner,
+    ).length
 
-    const columns = [0, 230, -230]
+    const parent = executivePoint(workerOwner)
+    const columns = [0, 205, -205]
 
-    const x =
-      ceoPosition.x +
-      columns[index % 3]
+    const x = parent.x + columns[index % 3]
 
     const y =
-      ceoPosition.y +
-      190 +
-      Math.floor(index / 3) * 120
+      parent.y +
+      135 +
+      Math.floor(index / 3) * 110
 
     setWorkers((current) => [
       ...current,
       {
         id: Date.now(),
         name: clean,
+        owner: workerOwner,
         x,
         y,
       },
@@ -408,6 +528,34 @@ export default function WorkflowStudio({
         <div
           ref={canvasRef}
           className="studio-canvas"
+          onDragOver={(event) => {
+            if (event.dataTransfer.types.includes('application/x-flwme-executive')) {
+              event.preventDefault()
+              event.dataTransfer.dropEffect = 'move'
+            }
+          }}
+          onDrop={(event) => {
+            const name = event.dataTransfer.getData('application/x-flwme-executive')
+            if (!ROLES.includes(name as ExecutiveRole)) return
+            event.preventDefault()
+            event.stopPropagation()
+            const role = name as ExecutiveRole
+            const rect = event.currentTarget.getBoundingClientRect()
+            const position: Point = {
+              x: (event.clientX - rect.left - rect.width / 2 - pan.x) / zoom,
+              y: (event.clientY - rect.top - rect.height / 2 - pan.y) / zoom,
+            }
+            const before = executivePoint(role)
+            const dx = position.x - before.x
+            const dy = position.y - before.y
+            setExecutiveOverrides((current) => ({ ...current, [role]: position }))
+            setWorkers((current) => current.map((worker) =>
+              worker.owner === role
+                ? { ...worker, x: worker.x + dx, y: worker.y + dy }
+                : worker,
+            ))
+            if (!executiveRoles.includes(role)) toggleExecutive(role)
+          }}
           onPointerDown={(event) => {
             const target =
               event.target as HTMLElement
@@ -492,12 +640,51 @@ export default function WorkflowStudio({
               viewBox="-1000 -700 2000 1400"
               aria-hidden="true"
             >
-              {workers.map((worker) => (
+              {executiveRoles.length > 0 && (
+                <path
+                  d={[
+                    `M ${ceoPosition.x} ${ceoPosition.y + CEO_HEIGHT / 2}`,
+                    `L ${ceoPosition.x} ${ceoPosition.y + 108}`,
+                  ].join(' ')}
+                  className="studio-link-path"
+                  vectorEffect="non-scaling-stroke"
+                />
+              )}
+
+              {executiveRoles.map((role) => {
+                const point = executivePoint(role)
+                const forkY = ceoPosition.y + 108
+
+                const targetY =
+                  point.y < forkY
+                    ? point.y + EXEC_HEIGHT / 2
+                    : point.y - EXEC_HEIGHT / 2
+
+                const middleY = (forkY + targetY) / 2
+
+                return (
+                  <path
+                    key={role}
+                    d={[
+                      `M ${ceoPosition.x} ${forkY}`,
+                      `C ${ceoPosition.x} ${middleY}`,
+                      `${point.x} ${middleY}`,
+                      `${point.x} ${targetY}`,
+                    ].join(' ')}
+                    className="studio-link-path"
+                    vectorEffect="non-scaling-stroke"
+                  />
+                )
+              })}
+
+              {workers.filter((worker) => executiveRoles.includes(worker.owner)).map((worker) => (
                 <path
                   key={worker.id}
                   d={connectorPath(
-                    ceoPosition,
+                    executivePoint(worker.owner),
                     worker,
+                    WORKER_WIDTH,
+                    WORKER_HEIGHT,
                   )}
                   className="studio-link-path"
                   vectorEffect="non-scaling-stroke"
@@ -584,20 +771,135 @@ export default function WorkflowStudio({
                 </span>
               </div>
 
-              <button
-                type="button"
-                className="studio-node-add"
-                onPointerDown={(event) =>
-                  event.stopPropagation()
-                }
-                onClick={openAddWorker}
-                title="Add Worker"
-              >
-                <Plus size={15} />
-              </button>
+
             </div>
 
-            {workers.map((worker) => (
+            {executiveRoles.map((role) => {
+              const point = executivePoint(role)
+
+              return (
+                <div
+                  key={role}
+                  className="studio-worker-node studio-node-card studio-exec-node"
+                  style={{
+                    left: '50%',
+                    top: '50%',
+                    transform:
+                      `translate(-50%, -50%) ` +
+                      `translate(${point.x}px, ${point.y}px)`,
+                  }}
+                  onPointerDown={(event) => {
+                    const target = event.target as HTMLElement
+
+                    if (target.closest('button')) return
+
+                    event.preventDefault()
+                    event.stopPropagation()
+                    event.currentTarget.setPointerCapture(event.pointerId)
+
+                    const point = executivePoint(role)
+
+                    dragRef.current = {
+                      type: 'executive',
+                      role,
+                      startX: event.clientX,
+                      startY: event.clientY,
+                      originX: point.x,
+                      originY: point.y,
+                      workersAtStart: workers
+                        .filter((worker) => worker.owner === role)
+                        .map((worker) => ({
+                          id: worker.id,
+                          x: worker.x,
+                          y: worker.y,
+                        })),
+                    }
+                  }}
+                  onPointerMove={(event) => {
+                    const drag = dragRef.current
+
+                    if (
+                      drag?.type !== 'executive' ||
+                      drag.role !== role
+                    ) return
+
+                    const dx =
+                      (event.clientX - drag.startX) / zoom
+                    const dy =
+                      (event.clientY - drag.startY) / zoom
+
+                    setExecutiveOverrides((current) => ({
+                      ...current,
+                      [role]: {
+                        x: drag.originX + dx,
+                        y: drag.originY + dy,
+                      },
+                    }))
+
+                    setWorkers((current) =>
+                      current.map((worker) => {
+                        const original = drag.workersAtStart.find(
+                          (item) => item.id === worker.id,
+                        )
+
+                        return original
+                          ? {
+                              ...worker,
+                              x: original.x + dx,
+                              y: original.y + dy,
+                            }
+                          : worker
+                      }),
+                    )
+                  }}
+                  onPointerUp={() => {
+                    if (dragRef.current?.type === 'executive') {
+                      dragRef.current = null
+                    }
+                  }}
+                  onPointerCancel={() => {
+                    if (dragRef.current?.type === 'executive') {
+                      dragRef.current = null
+                    }
+                  }}
+                >
+                  <div className="studio-worker-icon studio-exec-icon">
+                    <img
+                      src={`/assets/${role.toLowerCase()}icon.png`}
+                      alt=""
+                      draggable={false}
+                    />
+                  </div>
+
+                  <div className="studio-node-copy">
+                    <small>EXECUTIVE</small>
+                    <strong>{role}</strong>
+                    <span>{ROLE_NAMES[role]}</span>
+                  </div>
+
+                  <div className="studio-exec-buttons">
+                    <button
+                      type="button"
+                      title={`Add Worker to ${role}`}
+                      aria-label={`Add Worker to ${role}`}
+                      onClick={() => openAddWorker(role)}
+                    >
+                      <Plus size={13} />
+                    </button>
+                    <button
+                      type="button"
+                      title={`Remove ${role}`}
+                      aria-label={`Remove ${role}`}
+                      onClick={() => toggleExecutive(role)}
+                    >
+                      <X size={12} />
+                    </button>
+                  </div>
+                </div>
+              )
+            })}
+
+            {workers.filter((worker) => executiveRoles.includes(worker.owner)).map((worker) => (
               <div
                 key={worker.id}
                 className="studio-worker-node studio-node-card"
@@ -833,6 +1135,52 @@ export default function WorkflowStudio({
             </button>
           </div>
 
+          {manageExecutivesOpen && (
+            <div className="studio-worker-modal-backdrop"
+              onMouseDown={(event) => {
+                if (event.target === event.currentTarget) {
+                  setManageExecutivesOpen(false)
+                }
+              }}
+            >
+              <div className="studio-worker-modal">
+                <div className="studio-worker-modal-head">
+                  <div>
+                    <small>ORGANIZATION</small>
+                    <strong>Manage Executives</strong>
+                  </div>
+                  <button type="button"
+                    onClick={() => setManageExecutivesOpen(false)}
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
+
+                <p className="studio-exec-description">
+                  CEO is required. Other Executives are optional.
+                </p>
+
+                <div className="studio-exec-options">
+                  {ROLES.map((role) => (
+                    <button
+                      type="button"
+                      key={role}
+                      onClick={() => toggleExecutive(role)}
+                    >
+                      <strong>{role}</strong>
+                      <span>{ROLE_NAMES[role]}</span>
+                      <em>
+                        {executiveRoles.includes(role)
+                          ? 'Remove'
+                          : '+ Restore'}
+                      </em>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+
           {addWorkerOpen && (
             <div
               className="studio-worker-modal-backdrop"
@@ -856,7 +1204,7 @@ export default function WorkflowStudio({
                     </small>
 
                     <strong>
-                      Add Worker
+                      Add Worker to {workerOwner}
                     </strong>
                   </div>
 
@@ -920,7 +1268,7 @@ export default function WorkflowStudio({
               </div>
 
               <span>
-                {1 + workers.length}
+                {1 + ROLES.length + workers.length}
               </span>
             </div>
 
@@ -947,14 +1295,61 @@ export default function WorkflowStudio({
                   </span>
                 </div>
 
-                <button
-                  type="button"
-                  className="studio-team-add"
-                  onClick={openAddWorker}
-                >
-                  <Plus size={13} />
-                </button>
+
               </div>
+            </div>
+
+            <div className="studio-team-section">
+              <div className="studio-team-title">
+                <small>EXECUTIVE TEAM</small>
+                <span>{ROLES.length}</span>
+              </div>
+
+              {ROLES.map((role) => {
+                const onCanvas = executiveRoles.includes(role)
+                // No Rust/Modal task receipts yet: On Duty must NOT be invented.
+                const status = resolveExecutiveStatus(onCanvas, false)
+
+                return (
+                <div
+                  className="studio-team-card studio-exec-catalog-card"
+                  key={role}
+                  draggable
+                  title={`Drag ${role} to canvas`}
+                  onDragStart={(event) => {
+                    event.dataTransfer.effectAllowed = 'move'
+                    event.dataTransfer.setData(
+                      'application/x-flwme-executive', role,
+                    )
+                    event.dataTransfer.setData('text/plain', role)
+                  }}
+                >
+                  <span className="studio-team-avatar">
+                    <img
+                      src={`/assets/${role.toLowerCase()}icon.png`}
+                      alt=""
+                      draggable={false}
+                    />
+                  </span>
+                  <div>
+                    <strong>{role}</strong>
+                    <span>{ROLE_NAMES[role]}</span>
+                  </div>
+                  <span
+                    className={`studio-exec-catalog-status ${
+                      status === 'On Duty'
+                        ? 'is-on-duty'
+                        : status === 'Standby'
+                          ? 'is-standby'
+                          : 'is-on-leave'
+                    }`}
+                    aria-label={`${role}: ${status}`}
+                  >
+                    {status}
+                  </span>
+                </div>
+                )
+              })}
             </div>
 
             <div className="studio-team-section workers">
@@ -979,8 +1374,8 @@ export default function WorkflowStudio({
                   </strong>
 
                   <p>
-                    Add a worker from the CEO
-                    + button.
+                    Add Workers under an
+                    Executive using +.
                   </p>
                 </div>
               ) : (

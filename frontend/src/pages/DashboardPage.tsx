@@ -189,7 +189,7 @@ export default function DashboardPage() {
         <div className="clone-topbar">
           <div className="clone-brand">
             <img
-              src="/assets/flwme-logo.png"
+              src="/assets/flwmelogo.png"
               alt="FLWME"
               className="clone-brand-logo"
             />
