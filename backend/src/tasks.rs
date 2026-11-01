@@ -429,6 +429,90 @@ async fn mark_completed(state: &AppState, task: &ClaimedTask, result: &Value) {
         )
         .await;
 
+    // FLWME_ALK_LEARNING_EVIDENCE_V1
+    //
+    // A completed executive run produces durable raw learning evidence.
+    // This record is intentionally OBSERVED + PENDING only.
+    //
+    // It is not trusted organizational memory and must not be promoted
+    // without later evaluation + verification gates.
+    let learning_write = state
+        .db
+        .execute(
+            r#"
+            INSERT INTO learning_evidence (
+                schema_version,
+                company_id,
+                user_id,
+                task_id,
+                run_id,
+                agent,
+                objective,
+                output_json,
+                evidence_json,
+                verification_status,
+                learning_status,
+                source_event
+            )
+            SELECT
+                'flwme.learning.evidence.v1',
+                er.company_id,
+                er.user_id,
+                er.task_id,
+                er.run_id,
+                er.executive,
+                $2,
+                $3::text::jsonb,
+                '[]'::jsonb,
+                'pending',
+                'observed',
+                'executive_task_completion'
+            FROM executive_runs er
+            WHERE er.task_id = $1
+              AND er.company_id = $4
+              AND er.user_id = $5
+            ORDER BY er.created_at DESC
+            LIMIT 1
+            ON CONFLICT (
+                run_id,
+                source_event
+            )
+            DO NOTHING
+            "#,
+            &[
+                &task.task_id,
+                &task.objective,
+                &result_json,
+                &task.company_id,
+                &task.user_id,
+            ],
+        )
+        .await;
+
+    match learning_write {
+        Ok(1) => {
+            eprintln!("LEARNING_EVIDENCE_OBSERVED task_id={}", task.task_id);
+        }
+
+        Ok(0) => {
+            eprintln!("LEARNING_EVIDENCE_NOT_WRITTEN task_id={}", task.task_id);
+        }
+
+        Ok(_) => {
+            eprintln!(
+                "LEARNING_EVIDENCE_UNEXPECTED_WRITE_COUNT task_id={}",
+                task.task_id
+            );
+        }
+
+        Err(err) => {
+            eprintln!(
+                "LEARNING_EVIDENCE_WRITE_FAILED task_id={} error={}",
+                task.task_id, err
+            );
+        }
+    }
+
     let notification = format!(
         "Boss, the task I delegated to {} has been completed. Open the task to review the result.",
         task.assigned_to,

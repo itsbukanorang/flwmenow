@@ -7,6 +7,7 @@ import {
 
 import {
   ArrowLeft,
+  BrainCircuit,
   ChevronLeft,
   ChevronRight,
   Maximize2,
@@ -105,6 +106,34 @@ type CeoChatResponse = {
   model?: string
   cached_tokens?: number
   task?: TaskCard
+}
+
+// PLATFORM_LEARNING_V1
+type LearningSummary = {
+  observed: number
+  evaluated: number
+  verified: number
+  candidates: number
+  promoted: number
+  rejected: number
+}
+
+type LearningEvidence = {
+  id: number
+  company_id: number
+  user_id: number
+  task_id: string
+  run_id: string
+  agent: string
+  verification_status: string
+  learning_status: string
+  source_event: string
+  created_at: string
+}
+
+type LearningOverview = {
+  summary: LearningSummary
+  evidence: LearningEvidence[]
 }
 
 type TalkMessage = {
@@ -318,6 +347,32 @@ export default function WorkflowStudio({
   company,
   onBack,
 }: Props) {
+
+  const [
+    learningAllowed,
+    setLearningAllowed,
+  ] = useState(false)
+
+  const [
+    learningOpen,
+    setLearningOpen,
+  ] = useState(false)
+
+  const [
+    learningLoading,
+    setLearningLoading,
+  ] = useState(false)
+
+  const [
+    learningError,
+    setLearningError,
+  ] = useState('')
+
+  const [
+    learningData,
+    setLearningData,
+  ] = useState<LearningOverview | null>(null)
+
   const dragRef = useRef<DragState>(null)
   const canvasRef = useRef<HTMLDivElement>(null)
   const talkTextareaRef = useRef<HTMLTextAreaElement>(null)
@@ -558,7 +613,56 @@ export default function WorkflowStudio({
   }
 
   const toggleExecutive = (role: ExecutiveRole) => {
-    if (!company) return
+    
+  useEffect(() => {
+    let active = true
+
+    if (!company) {
+      setLearningAllowed(false)
+
+      return () => {
+        active = false
+      }
+    }
+
+    void fetch('/api/auth/me', {
+      credentials: 'include',
+      cache: 'no-store',
+      headers: {
+        Accept: 'application/json',
+      },
+    })
+      .then(async (response) => {
+        if (!response.ok) {
+          return null
+        }
+
+        return (await response.json()) as {
+          email?: string
+          platform_owner?: boolean
+        }
+      })
+      .then((data) => {
+        if (!active) {
+          return
+        }
+
+        setLearningAllowed(
+          data?.platform_owner === true,
+        )
+      })
+      .catch(() => {
+        if (active) {
+          setLearningAllowed(false)
+        }
+      })
+
+    return () => {
+      active = false
+    }
+  }, [company?.id])
+
+if (!company) return
 
     const removing = executiveRoles.includes(role)
 
@@ -1285,6 +1389,82 @@ export default function WorkflowStudio({
               </span>
             )}
           </button>
+
+            {(
+              <button
+                type="button"
+                className="studio-task-center-button"
+                onClick={() => {
+                  setTaskCenterOpen(false)
+                  setSelectedTask(null)
+                  setLearningOpen(true)
+                  setLearningLoading(true)
+                  setLearningError('')
+
+                  void fetch(
+                    '/api/platform/learning',
+                    {
+                      headers: {
+                        Accept:
+                          'application/json',
+                      },
+                      cache: 'no-store',
+                    },
+                  )
+                    .then(async (response) => {
+                      if (!response.ok) {
+                        throw new Error(
+                          'Learning unavailable',
+                        )
+                      }
+
+                      return (
+                        await response.json()
+                      ) as LearningOverview
+                    })
+                    .then((data) => {
+                      setLearningData(data)
+                    })
+                    .catch(() => {
+                      setLearningError(
+                        'Unable to load learning trace.',
+                      )
+                    })
+                    .finally(() => {
+                      setLearningLoading(false)
+                    })
+                }}
+                data-platform-owner={
+                  learningAllowed
+                    ? 'true'
+                    : 'false'
+                }
+                title="Learning"
+                aria-label="Learning"
+              >
+                <BrainCircuit size={14} />
+
+                <span
+                  className="studio-task-center-label"
+                >
+                  Learning
+                </span>
+
+                {learningData &&
+                  learningData.summary.observed >
+                    0 && (
+                    <span
+                      className="studio-task-center-count"
+                    >
+                      {
+                        learningData.summary
+                          .observed
+                      }
+                    </span>
+                  )}
+              </button>
+            )}
+
 
           <button
             type="button"
@@ -2203,6 +2383,212 @@ export default function WorkflowStudio({
               </p>
             )}
           </div>
+
+          {learningOpen && (
+            <div
+              className="studio-task-center-backdrop"
+              onWheelCapture={(event) => {
+                event.stopPropagation()
+              }}
+              onTouchMove={(event) => {
+                event.stopPropagation()
+              }}
+              onMouseDown={(event) => {
+                if (
+                  event.target ===
+                  event.currentTarget
+                ) {
+                  setLearningOpen(false)
+                }
+              }}
+            >
+              <section
+                className="studio-task-center studio-learning-center"
+                onWheel={(event) => {
+                  event.stopPropagation()
+                }}
+              >
+                <header
+                  className="studio-task-center-head"
+                >
+                  <div>
+                    <small>
+                      PLATFORM LEARNING
+                    </small>
+
+                    <strong>
+                      Learning
+                    </strong>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setLearningOpen(false)
+                    }
+                    aria-label="Close Learning"
+                  >
+                    <X size={15} />
+                  </button>
+                </header>
+
+                {learningLoading && (
+                  <div
+                    className="studio-learning-empty"
+                  >
+                    Loading learning trace...
+                  </div>
+                )}
+
+                {!learningLoading &&
+                  learningError && (
+                    <div
+                      className="studio-learning-empty"
+                    >
+                      {learningError}
+                    </div>
+                  )}
+
+                {!learningLoading &&
+                  !learningError &&
+                  learningData && (
+                    <div
+                      className="studio-learning-body"
+                    >
+                      <div
+                        className="studio-learning-stats"
+                      >
+                        {[
+                          [
+                            'Observed',
+                            learningData.summary
+                              .observed,
+                          ],
+                          [
+                            'Evaluated',
+                            learningData.summary
+                              .evaluated,
+                          ],
+                          [
+                            'Verified',
+                            learningData.summary
+                              .verified,
+                          ],
+                          [
+                            'Candidates',
+                            learningData.summary
+                              .candidates,
+                          ],
+                          [
+                            'Promoted',
+                            learningData.summary
+                              .promoted,
+                          ],
+                          [
+                            'Rejected',
+                            learningData.summary
+                              .rejected,
+                          ],
+                        ].map(
+                          ([label, value]) => (
+                            <div
+                              key={String(label)}
+                              className="studio-learning-stat"
+                            >
+                              <span>
+                                {label}
+                              </span>
+
+                              <strong>
+                                {value}
+                              </strong>
+                            </div>
+                          ),
+                        )}
+                      </div>
+
+                      <div
+                        className="studio-learning-list"
+                      >
+                        <div
+                          className="studio-learning-list-head"
+                        >
+                          Recent Learning
+                        </div>
+
+                        {learningData.evidence
+                          .length === 0 ? (
+                          <div
+                            className="studio-learning-empty"
+                          >
+                            No learning evidence yet.
+                          </div>
+                        ) : (
+                          learningData.evidence.map(
+                            (item) => (
+                              <article
+                                key={item.id}
+                                className="studio-learning-item"
+                              >
+                                <div
+                                  className="studio-learning-item-top"
+                                >
+                                  <strong>
+                                    {item.agent}
+                                  </strong>
+
+                                  <span>
+                                    {
+                                      item.learning_status
+                                    }
+                                    {' · '}
+                                    {
+                                      item.verification_status
+                                    }
+                                  </span>
+                                </div>
+
+                                <div
+                                  className="studio-learning-meta"
+                                >
+                                  <span>
+                                    Company{' '}
+                                    {item.company_id}
+                                  </span>
+
+                                  <span>
+                                    User{' '}
+                                    {item.user_id}
+                                  </span>
+
+                                  <span>
+                                    Evidence #{item.id}
+                                  </span>
+                                </div>
+
+                                <code>
+                                  {item.task_id}
+                                </code>
+
+                                <code>
+                                  {item.run_id}
+                                </code>
+
+                                <time>
+                                  {new Date(
+                                    item.created_at,
+                                  ).toLocaleString()}
+                                </time>
+                              </article>
+                            ),
+                          )
+                        )}
+                      </div>
+                    </div>
+                  )}
+              </section>
+            </div>
+          )}
 
           {taskCenterOpen && (
             <div

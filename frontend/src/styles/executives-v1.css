@@ -1934,3 +1934,126 @@ flwmeTalkWorkspaceMinimize {
   flex: 0 0 auto !important;
   margin: 0 !important;
 }
+
+/* PLATFORM_LEARNING_V1 */
+
+.studio-learning-center {
+  width: min(620px, calc(100vw - 32px));
+}
+
+.studio-learning-body {
+  display: grid;
+  gap: 18px;
+  padding: 18px;
+  overflow: auto;
+}
+
+.studio-learning-stats {
+  display: grid;
+  grid-template-columns:
+    repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.studio-learning-stat {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid
+    rgba(87, 190, 235, 0.16);
+  border-radius: 12px;
+  background:
+    rgba(4, 31, 48, 0.58);
+}
+
+.studio-learning-stat span {
+  display: block;
+  margin-bottom: 5px;
+  color: rgba(190, 220, 233, 0.62);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.studio-learning-stat strong {
+  color: #f4fbff;
+  font-size: 20px;
+}
+
+.studio-learning-list {
+  display: grid;
+  gap: 10px;
+}
+
+.studio-learning-list-head {
+  color: rgba(226, 243, 250, 0.78);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.studio-learning-item {
+  display: grid;
+  gap: 8px;
+  padding: 13px;
+  border: 1px solid
+    rgba(87, 190, 235, 0.14);
+  border-radius: 12px;
+  background:
+    rgba(5, 34, 52, 0.7);
+}
+
+.studio-learning-item-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.studio-learning-item-top strong {
+  color: #f1fbff;
+  font-size: 13px;
+}
+
+.studio-learning-item-top span {
+  color: rgba(127, 214, 244, 0.82);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: capitalize;
+}
+
+.studio-learning-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  color: rgba(185, 215, 228, 0.58);
+  font-size: 10px;
+}
+
+.studio-learning-item code {
+  overflow: hidden;
+  color: rgba(197, 226, 238, 0.68);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.studio-learning-item time {
+  color: rgba(174, 205, 218, 0.48);
+  font-size: 10px;
+}
+
+.studio-learning-empty {
+  padding: 20px;
+  color: rgba(190, 220, 233, 0.62);
+  font-size: 12px;
+  text-align: center;
+}
+
+@media (max-width: 640px) {
+  .studio-learning-stats {
+    grid-template-columns:
+      repeat(2, minmax(0, 1fr));
+  }
+}

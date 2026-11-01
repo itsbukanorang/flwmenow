@@ -3,6 +3,7 @@ mod ceo;
 mod companies;
 mod delegation;
 mod executive;
+mod platform_learning;
 mod security;
 
 mod tasks;
@@ -50,6 +51,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/auth/login", post(auth::login))
         .route("/api/auth/me", get(auth::me))
         .route("/api/auth/logout", post(auth::logout))
+        .route(
+            "/api/platform/learning/access",
+            get(platform_learning::access),
+        )
+        .route("/api/platform/learning", get(platform_learning::overview))
         .route(
             "/api/companies",
             get(companies::list).post(companies::create),
