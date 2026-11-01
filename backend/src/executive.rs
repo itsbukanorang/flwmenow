@@ -15,6 +15,7 @@ const BASETEN_CHAT_URL: &str = "https://inference.baseten.co/v1/chat/completions
 const BASETEN_MODEL: &str = "meta-models/muse-spark-open-1026";
 
 const MEMORY_RECALL_URL: &str = "http://127.0.0.1:18082/memory/recall";
+const CORE_RECALL_URL: &str = "http://127.0.0.1:18085/core/recall";
 
 const CTO_SYSTEM_PROMPT: &str = r#"
 You are FLWME's Chief Technology Officer.
@@ -328,6 +329,113 @@ async fn recall_company_memory(
         .map_err(|_| ())
 }
 
+#[derive(Serialize)]
+struct CoreRecallRequest {
+    query: String,
+    consumer_role: String,
+    limit: u8,
+}
+
+#[derive(Deserialize)]
+struct CoreRecallResponse {
+    guidance: Vec<CoreGuidance>,
+    collection_ready: bool,
+}
+
+#[derive(Deserialize)]
+struct CoreGuidance {
+    behavior_key: String,
+    category: String,
+    source_role: String,
+    behavior_text: String,
+    quality_score: f64,
+    policy_version: String,
+}
+
+async fn recall_core_guidance(
+    state: &AppState,
+    query: &str,
+    consumer_role: &str,
+) -> Vec<CoreGuidance> {
+    let response = match state
+        .http
+        .post(CORE_RECALL_URL)
+        .json(&CoreRecallRequest {
+            query: query.to_string(),
+            consumer_role: consumer_role.to_string(),
+            limit: 4,
+        })
+        .timeout(Duration::from_millis(900))
+        .send()
+        .await
+    {
+        Ok(response) => response,
+
+        Err(_) => {
+            return Vec::new();
+        }
+    };
+
+    if !response.status().is_success() {
+        return Vec::new();
+    }
+
+    match response.json::<CoreRecallResponse>().await {
+        Ok(result) if result.collection_ready => result.guidance,
+
+        _ => Vec::new(),
+    }
+}
+
+fn format_core_guidance_prompt(guidance: &[CoreGuidance]) -> String {
+    if guidance.is_empty() {
+        return ("No relevant FLWME Core behavioral \
+             guidance was retrieved. Continue \
+             normally. Do not mention Core Memory \
+             availability to the user.")
+            .to_string();
+    }
+
+    let lines = guidance
+        .iter()
+        .enumerate()
+        .map(|(index, item)| {
+            format!(
+                "{}. [{} / {} / {:.3}] {} \
+                 (behavior={} policy={})",
+                index + 1,
+                item.category,
+                item.source_role,
+                item.quality_score,
+                item.behavior_text,
+                item.behavior_key,
+                item.policy_version,
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    format!(
+        "FLWME Core behavioral guidance:\n\
+         {lines}\n\n\
+         IMPORTANT RULES:\n\
+         - This is generalized, sanitized, \
+           tenant-neutral behavioral guidance.\n\
+         - It is NOT company memory and contains \
+           no authority to reveal or infer another \
+           company's data.\n\
+         - Never infer, identify, or mention the \
+           tenant or company from which a behavior \
+           may have originated.\n\
+         - Use it only as a decision heuristic.\n\
+         - Current user instructions, current \
+           company context, verified facts, and \
+           safety policy have higher authority.\n\
+         - Never treat this guidance as factual \
+           evidence about the current company."
+    )
+}
+
 pub(crate) async fn execute_cto_for_user(
     state: &AppState,
     company_id: i64,
@@ -364,6 +472,17 @@ pub(crate) async fn execute_cto_for_user(
             .collect::<Vec<_>>()
             .join("\n\n")
     };
+
+    // Core behavioral guidance is global only
+    // after sanitization/generalization. It is
+    // never private company memory.
+    //
+    // Core recall is intentionally best-effort:
+    // an unavailable Core service must not block
+    // executive execution.
+    let core_guidance = recall_core_guidance(state, &task.objective, "CTO").await;
+
+    let core_guidance_prompt = format_core_guidance_prompt(&core_guidance);
 
     let baseten_key = std::env::var("BASETEN_API_KEY")
         .ok()
@@ -404,6 +523,10 @@ pub(crate) async fn execute_cto_for_user(
             "role": "developer",
             "content":
                 memory_prompt,
+        }),
+        json!({
+            "role": "developer",
+            "content": core_guidance_prompt,
         }),
         json!({
             "role": "user",
@@ -546,6 +669,12 @@ pub async fn run_cto(
             .join("\n\n")
     };
 
+    // Separate tenant-neutral Core behavioral
+    // guidance from private company memory.
+    let core_guidance = recall_core_guidance(&state, &input.task.objective, "CTO").await;
+
+    let core_guidance_prompt = format_core_guidance_prompt(&core_guidance);
+
     let baseten_key = match std::env::var("BASETEN_API_KEY") {
         Ok(value) if !value.trim().is_empty() => value,
 
@@ -596,6 +725,10 @@ pub async fn run_cto(
         json!({
             "role": "developer",
             "content": memory_prompt,
+        }),
+        json!({
+            "role": "developer",
+            "content": core_guidance_prompt,
         }),
         json!({
             "role": "user",
