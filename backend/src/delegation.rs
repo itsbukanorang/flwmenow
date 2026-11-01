@@ -12,9 +12,9 @@ use serde_json::{Value, json};
 
 use crate::{AppState, executive, security};
 
-const LANGGRAPH_START_URL: &str = "http://127.0.0.1:18083/v1/delegations/cto/start";
+const LANGGRAPH_START_URL: &str = "http://127.0.0.1:18083/v1/delegations/executive/start";
 
-const LANGGRAPH_RESUME_URL: &str = "http://127.0.0.1:18083/v1/delegations/cto/resume";
+const LANGGRAPH_RESUME_URL: &str = "http://127.0.0.1:18083/v1/delegations/executive/resume";
 
 const CTO_URL: &str = "http://127.0.0.1:18081/api/executives/cto/run";
 
@@ -738,14 +738,16 @@ pub async fn run_cto_delegation(
     )
 }
 
-pub(crate) async fn execute_cto_task(
+pub(crate) async fn execute_executive_task(
     state: &AppState,
+    role: executive::ExecutiveRole,
     task_id: &str,
     company_id: i64,
     user_id: i64,
     task: DelegatedTask,
 ) -> Result<Value, String> {
     let run_id = make_run_id();
+    let executive_code = role.code();
 
     state
         .db
@@ -761,16 +763,12 @@ pub(crate) async fn execute_cto_task(
                 status
             )
             VALUES (
-                $1,
-                $2,
-                $3,
-                $4,
-                'CTO',
+                $1, $2, $3, $4, $5,
                 'langgraph',
                 'created'
             )
             "#,
-            &[&run_id, &task_id, &company_id, &user_id],
+            &[&run_id, &task_id, &company_id, &user_id, &executive_code],
         )
         .await
         .map_err(|_| "Unable to create executive run".to_string())?;
@@ -780,13 +778,9 @@ pub(crate) async fn execute_cto_task(
         .post(LANGGRAPH_START_URL)
         .json(&StartRequest {
             run_id: run_id.clone(),
-
             company_id,
-
             user_id,
-
-            executive: "CTO",
-
+            executive: executive_code,
             task: task.clone(),
         })
         .timeout(std::time::Duration::from_secs(5))
@@ -814,9 +808,11 @@ pub(crate) async fn execute_cto_task(
         .await
         .map_err(|_| "Invalid LangGraph response".to_string())?;
 
+    let expected_action = format!("execute_{}", executive_code.to_ascii_lowercase());
+
     if start.run_id != run_id
-        || start.executive != "CTO"
-        || start.action != "execute_cto"
+        || start.executive != executive_code
+        || start.action != expected_action
         || start.status != "awaiting_executive"
     {
         set_run_state(
@@ -846,32 +842,25 @@ pub(crate) async fn execute_cto_task(
 
     let exec_task = executive::ExecutiveTask {
         objective: task.objective.clone(),
-
         context: task.context.clone(),
-
         constraints: task.constraints.clone(),
     };
 
-    let execution = executive::execute_cto_for_user(state, company_id, user_id, &exec_task).await;
+    let execution =
+        executive::execute_executive_for_user(state, role, company_id, user_id, &exec_task).await;
 
     let resume_request = match execution {
         Ok(output) => ResumeRequest {
             run_id: run_id.clone(),
-
             ok: true,
-
             output: Some(output),
-
             error: None,
         },
 
         Err(message) => ResumeRequest {
             run_id: run_id.clone(),
-
             ok: false,
-
             output: None,
-
             error: Some(message),
         },
     };
@@ -886,17 +875,6 @@ pub(crate) async fn execute_cto_task(
         .map_err(|_| "LangGraph resume unavailable".to_string())?;
 
     if !resume_response.status().is_success() {
-        set_run_state(
-            state,
-            &run_id,
-            "failed",
-            start.attempt,
-            "exhausted",
-            &start.verifier_state,
-            Some("LangGraph resume rejected"),
-        )
-        .await;
-
         return Err("LangGraph resume rejected".to_string());
     }
 
@@ -905,7 +883,7 @@ pub(crate) async fn execute_cto_task(
         .await
         .map_err(|_| "Invalid LangGraph final response".to_string())?;
 
-    if finished.run_id != run_id || finished.executive != "CTO" {
+    if finished.run_id != run_id || finished.executive != executive_code {
         return Err("LangGraph run identity mismatch".to_string());
     }
 

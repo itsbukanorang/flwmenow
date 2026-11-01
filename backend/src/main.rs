@@ -4,6 +4,7 @@ mod companies;
 mod delegation;
 mod executive;
 mod platform_learning;
+mod roster;
 mod security;
 
 mod tasks;
@@ -68,6 +69,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/ceo/history", get(ceo::history))
         .route("/api/ceo/clear", post(ceo::clear_history))
         .route("/api/executives/cto/run", post(executive::run_cto))
+        .route("/api/executives/coo/run", post(executive::run_coo))
+        .route("/api/executives/cfo/run", post(executive::run_cfo))
+        .route("/api/executives/cmo/run", post(executive::run_cmo))
+        .route(
+            "/api/executives/roster",
+            get(roster::get).post(roster::update),
+        )
         .route(
             "/api/delegations/active",
             get(delegation::active_delegation),

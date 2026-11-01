@@ -9,14 +9,17 @@ use axum::{
 
 use serde::{Deserialize, Serialize};
 
-use serde_json::Value;
+use serde_json::{Value, json};
 use tokio_postgres::Row;
 
 use crate::{
     AppState,
     delegation::{self, DelegatedTask},
+    executive::ExecutiveRole,
     security,
 };
+
+const LANGGRAPH_ORGANIZATION_PLAN_URL: &str = "http://127.0.0.1:18083/v1/orchestrations/plan";
 
 #[derive(Deserialize)]
 pub struct TaskListQuery {
@@ -28,6 +31,7 @@ struct TaskRecord {
     task_id: String,
     company_id: i64,
     assigned_to: String,
+    executives: Vec<String>,
     title: String,
     objective: String,
     context: Option<String>,
@@ -130,6 +134,32 @@ fn parse_result(raw: Option<String>) -> Option<Value> {
     raw.and_then(|value| serde_json::from_str::<Value>(&value).ok())
 }
 
+fn parse_executives(raw: String) -> Vec<String> {
+    serde_json::from_str::<Vec<String>>(&raw).unwrap_or_default()
+}
+
+fn role_from_code(value: &str) -> Option<ExecutiveRole> {
+    match value {
+        "CTO" => Some(ExecutiveRole::Cto),
+        "COO" => Some(ExecutiveRole::Coo),
+        "CFO" => Some(ExecutiveRole::Cfo),
+        "CMO" => Some(ExecutiveRole::Cmo),
+        _ => None,
+    }
+}
+
+#[derive(Serialize)]
+struct OrganizationPlanRequest {
+    task_id: String,
+    active_executives: Vec<String>,
+    requested_batches: Vec<Vec<String>>,
+}
+
+#[derive(Deserialize)]
+struct OrganizationPlanResponse {
+    batches: Vec<Vec<String>>,
+}
+
 fn task_from_row(row: &Row) -> TaskRecord {
     TaskRecord {
         task_id: row.get("task_id"),
@@ -137,6 +167,8 @@ fn task_from_row(row: &Row) -> TaskRecord {
         company_id: row.get("company_id"),
 
         assigned_to: row.get("assigned_to"),
+
+        executives: parse_executives(row.get("executives_json")),
 
         title: row.get("title"),
 
@@ -173,6 +205,15 @@ SELECT
     t.task_id,
     t.company_id,
     t.assigned_to,
+
+    CASE
+        WHEN orchestration.executives_json IS NOT NULL
+        THEN orchestration.executives_json::text
+        ELSE jsonb_build_array(
+            t.assigned_to
+        )::text
+    END AS executives_json,
+
     t.title,
     t.objective,
     t.context,
@@ -208,6 +249,10 @@ SELECT
         AS updated_at_ms
 
 FROM tasks t
+
+LEFT JOIN task_orchestrations orchestration
+    ON orchestration.task_id =
+        t.task_id
 
 LEFT JOIN LATERAL (
     SELECT run_id
@@ -436,10 +481,11 @@ async fn mark_completed(state: &AppState, task: &ClaimedTask, result: &Value) {
     //
     // It is not trusted organizational memory and must not be promoted
     // without later evaluation + verification gates.
-    let learning_write = state
-        .db
-        .execute(
-            r#"
+    if task.assigned_to != "ORGANIZATION" {
+        let learning_write = state
+            .db
+            .execute(
+                r#"
             INSERT INTO learning_evidence (
                 schema_version,
                 company_id,
@@ -479,38 +525,44 @@ async fn mark_completed(state: &AppState, task: &ClaimedTask, result: &Value) {
             )
             DO NOTHING
             "#,
-            &[
-                &task.task_id,
-                &task.objective,
-                &result_json,
-                &task.company_id,
-                &task.user_id,
-            ],
-        )
-        .await;
+                &[
+                    &task.task_id,
+                    &task.objective,
+                    &result_json,
+                    &task.company_id,
+                    &task.user_id,
+                ],
+            )
+            .await;
 
-    match learning_write {
-        Ok(1) => {
-            eprintln!("LEARNING_EVIDENCE_OBSERVED task_id={}", task.task_id);
-        }
+        match learning_write {
+            Ok(1) => {
+                eprintln!("LEARNING_EVIDENCE_OBSERVED task_id={}", task.task_id);
+            }
 
-        Ok(0) => {
-            eprintln!("LEARNING_EVIDENCE_NOT_WRITTEN task_id={}", task.task_id);
-        }
+            Ok(0) => {
+                eprintln!("LEARNING_EVIDENCE_NOT_WRITTEN task_id={}", task.task_id);
+            }
 
-        Ok(_) => {
-            eprintln!(
-                "LEARNING_EVIDENCE_UNEXPECTED_WRITE_COUNT task_id={}",
-                task.task_id
-            );
-        }
+            Ok(_) => {
+                eprintln!(
+                    "LEARNING_EVIDENCE_UNEXPECTED_WRITE_COUNT task_id={}",
+                    task.task_id
+                );
+            }
 
-        Err(err) => {
-            eprintln!(
-                "LEARNING_EVIDENCE_WRITE_FAILED task_id={} error={}",
-                task.task_id, err
-            );
+            Err(err) => {
+                eprintln!(
+                    "LEARNING_EVIDENCE_WRITE_FAILED task_id={} error={}",
+                    task.task_id, err
+                );
+            }
         }
+    } else {
+        eprintln!(
+            "MULTI_AGENT_LEARNING_EVIDENCE_DEFERRED task_id={}",
+            task.task_id,
+        );
     }
 
     let notification = format!(
@@ -629,30 +681,215 @@ async fn mark_failed(state: &AppState, task: &ClaimedTask, message: &str) {
         .await;
 }
 
-async fn process_task(state: &AppState, task: ClaimedTask) {
-    if task.assigned_to != "CTO" {
-        mark_failed(state, &task, "Unsupported executive assignment").await;
+async fn organization_source_plan(
+    state: &AppState,
+    task_id: &str,
+) -> Result<(Vec<String>, Vec<Vec<String>>), String> {
+    let row = state
+        .db
+        .query_opt(
+            r#"
+            SELECT
+                active_roster_json::text,
+                requested_batches_json::text
+            FROM task_orchestrations
+            WHERE task_id = $1
+            "#,
+            &[&task_id],
+        )
+        .await
+        .map_err(|_| "Organization plan unavailable".to_string())?
+        .ok_or_else(|| "Organization plan missing".to_string())?;
 
-        return;
+    let active_raw: String = row.get(0);
+
+    let batches_raw: String = row.get(1);
+
+    let active_executives = serde_json::from_str::<Vec<String>>(&active_raw)
+        .map_err(|_| "Invalid organization roster".to_string())?;
+
+    let requested_batches = serde_json::from_str::<Vec<Vec<String>>>(&batches_raw)
+        .map_err(|_| "Invalid organization plan".to_string())?;
+
+    Ok((active_executives, requested_batches))
+}
+
+async fn set_organization_state(
+    state: &AppState,
+    task_id: &str,
+    status: &str,
+    resolved_batches: Option<&Vec<Vec<String>>>,
+) {
+    let resolved_json = resolved_batches.and_then(|value| serde_json::to_string(value).ok());
+
+    let _ = state
+        .db
+        .execute(
+            r#"
+            UPDATE task_orchestrations
+            SET
+                status = $2,
+                resolved_batches_json =
+                    COALESCE(
+                        $3::jsonb,
+                        resolved_batches_json
+                    ),
+                updated_at = now()
+            WHERE task_id = $1
+            "#,
+            &[&task_id, &status, &resolved_json],
+        )
+        .await;
+}
+
+async fn execute_organization_task(
+    state: &AppState,
+    task: &ClaimedTask,
+    delegated: &DelegatedTask,
+) -> Result<Value, String> {
+    let (active_executives, requested_batches) =
+        organization_source_plan(state, &task.task_id).await?;
+
+    let response = state
+        .http
+        .post(LANGGRAPH_ORGANIZATION_PLAN_URL)
+        .json(&OrganizationPlanRequest {
+            task_id: task.task_id.clone(),
+            active_executives,
+            requested_batches,
+        })
+        .timeout(Duration::from_secs(5))
+        .send()
+        .await
+        .map_err(|_| "LangGraph organization planner unavailable".to_string())?;
+
+    if !response.status().is_success() {
+        set_organization_state(state, &task.task_id, "failed", None).await;
+
+        return Err("LangGraph rejected organization plan".to_string());
     }
 
+    let plan = response
+        .json::<OrganizationPlanResponse>()
+        .await
+        .map_err(|_| "Invalid LangGraph organization plan".to_string())?;
+
+    if plan.batches.is_empty() {
+        return Err("LangGraph returned empty organization plan".to_string());
+    }
+
+    set_organization_state(state, &task.task_id, "running", Some(&plan.batches)).await;
+
+    let mut aggregated: Vec<Value> = Vec::new();
+
+    // Batches execute sequentially.
+    // Members inside one batch execute concurrently.
+    for batch in &plan.batches {
+        if batch.is_empty() {
+            return Err("LangGraph returned empty execution batch".to_string());
+        }
+
+        let mut jobs = tokio::task::JoinSet::new();
+
+        for executive_code in batch {
+            let role = role_from_code(executive_code)
+                .ok_or_else(|| "LangGraph returned unsupported executive".to_string())?;
+
+            let child_state = state.clone();
+
+            let child_task_id = task.task_id.clone();
+
+            let child_task = delegated.clone();
+
+            let company_id = task.company_id;
+
+            let user_id = task.user_id;
+
+            let executive = executive_code.clone();
+
+            jobs.spawn(async move {
+                let result = delegation::execute_executive_task(
+                    &child_state,
+                    role,
+                    &child_task_id,
+                    company_id,
+                    user_id,
+                    child_task,
+                )
+                .await;
+
+                (executive, result)
+            });
+        }
+
+        while let Some(joined) = jobs.join_next().await {
+            let (executive, result) =
+                joined.map_err(|_| "Executive execution task failed".to_string())?;
+
+            match result {
+                Ok(output) => {
+                    aggregated.push(json!({
+                        "executive":
+                            executive,
+                        "result":
+                            output,
+                    }));
+                }
+
+                Err(message) => {
+                    jobs.abort_all();
+
+                    set_organization_state(state, &task.task_id, "failed", Some(&plan.batches))
+                        .await;
+
+                    return Err(format!("{} execution failed: {}", executive, message,));
+                }
+            }
+        }
+    }
+
+    set_organization_state(state, &task.task_id, "completed", Some(&plan.batches)).await;
+
+    Ok(json!({
+        "orchestration":
+            "langgraph",
+        "execution":
+            "multi-agent",
+        "batches":
+            plan.batches,
+        "results":
+            aggregated,
+    }))
+}
+
+async fn process_task(state: &AppState, task: ClaimedTask) {
     let delegated = DelegatedTask {
         objective: task.objective.clone(),
-
         context: task.context.clone(),
-
         constraints: task.constraints.clone(),
     };
 
-    match delegation::execute_cto_task(
-        state,
-        &task.task_id,
-        task.company_id,
-        task.user_id,
-        delegated,
-    )
-    .await
-    {
+    let execution = if task.assigned_to == "ORGANIZATION" {
+        execute_organization_task(state, &task, &delegated).await
+    } else {
+        let Some(role) = role_from_code(&task.assigned_to) else {
+            mark_failed(state, &task, "Unsupported executive assignment").await;
+
+            return;
+        };
+
+        delegation::execute_executive_task(
+            state,
+            role,
+            &task.task_id,
+            task.company_id,
+            task.user_id,
+            delegated,
+        )
+        .await
+    };
+
+    match execution {
         Ok(result) => {
             mark_completed(state, &task, &result).await;
         }

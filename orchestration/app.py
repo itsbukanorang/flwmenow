@@ -8,6 +8,14 @@ from langgraph.constants import END, START
 from langgraph.graph import StateGraph
 from langgraph.types import Command, interrupt
 
+SUPPORTED_EXECUTIVES = {
+    "CTO",
+    "COO",
+    "CFO",
+    "CMO",
+}
+
+
 
 class DelegationState(TypedDict, total=False):
     run_id: str
@@ -57,9 +65,11 @@ class ResumeRequest(BaseModel):
 def validate_and_plan(
     state: DelegationState,
 ) -> dict[str, Any]:
-    if state["executive"] != "CTO":
+    executive = state["executive"]
+
+    if executive not in SUPPORTED_EXECUTIVES:
         raise ValueError(
-            "API-04 gate supports CTO only"
+            "unsupported executive"
         )
 
     task = state.get("task")
@@ -83,7 +93,7 @@ def validate_and_plan(
         "attempt": 0,
         "max_attempts": 1,
         "plan": [
-            "delegate:CTO",
+            f"delegate:{executive}",
         ],
         "retry_state": "idle",
         "verifier_state": "not_started",
@@ -93,12 +103,18 @@ def validate_and_plan(
 def dispatch_executive(
     state: DelegationState,
 ) -> dict[str, Any]:
+    executive = state["executive"]
+
     receipt = interrupt(
         {
-            "action": "execute_cto",
-            "executive": "CTO",
-            "run_id": state["run_id"],
-            "attempt": state["attempt"],
+            "action":
+                f"execute_{executive.lower()}",
+            "executive":
+                executive,
+            "run_id":
+                state["run_id"],
+            "attempt":
+                state["attempt"],
         }
     )
 
@@ -272,7 +288,9 @@ def start_run(
         "plan":
             result.get(
                 "plan",
-                ["delegate:CTO"],
+                [
+                    f"delegate:{request.executive}"
+                ],
             ),
         "retry_state":
             result.get(
@@ -359,11 +377,14 @@ async def healthz():
     return {
         "ok": True,
         "runtime": "langgraph",
-        "version": "1.2.19",
-        "graph": "cto-delegation-v1",
+        "version": "1.3.0",
+        "graph": "multi-executive-routing-v1",
     }
 
 
+@app.post(
+    "/v1/delegations/executive/start"
+)
 @app.post(
     "/v1/delegations/cto/start"
 )
@@ -383,6 +404,9 @@ async def start(
 
 
 @app.post(
+    "/v1/delegations/executive/resume"
+)
+@app.post(
     "/v1/delegations/cto/resume"
 )
 async def resume(
@@ -396,5 +420,109 @@ async def resume(
     except Exception as exc:
         raise HTTPException(
             status_code=409,
+            detail=str(exc),
+        ) from exc
+
+
+# FLWME API-05 MULTI-AGENT ORGANIZATION PLANNER
+
+class OrganizationPlanRequest(BaseModel):
+    task_id: str = Field(
+        min_length=8,
+        max_length=128,
+    )
+
+    active_executives: list[str]
+
+    requested_batches: list[list[str]]
+
+
+def resolve_organization_plan(
+    request: OrganizationPlanRequest,
+) -> list[list[str]]:
+    active = set(
+        request.active_executives
+    )
+
+    if not active.issubset(
+        SUPPORTED_EXECUTIVES
+    ):
+        raise ValueError(
+            "active roster contains unsupported executive"
+        )
+
+    if not request.requested_batches:
+        raise ValueError(
+            "organization plan requires at least one batch"
+        )
+
+    resolved: list[list[str]] = []
+    seen: set[str] = set()
+
+    for batch in request.requested_batches:
+        if not batch:
+            raise ValueError(
+                "organization batch cannot be empty"
+            )
+
+        clean: list[str] = []
+
+        for executive in batch:
+            if executive not in SUPPORTED_EXECUTIVES:
+                raise ValueError(
+                    "unsupported executive in organization plan"
+                )
+
+            if executive not in active:
+                raise ValueError(
+                    "inactive executive in organization plan"
+                )
+
+            if executive in seen:
+                raise ValueError(
+                    "executive appears more than once"
+                )
+
+            seen.add(executive)
+            clean.append(executive)
+
+        resolved.append(clean)
+
+    if len(seen) < 2:
+        raise ValueError(
+            "multi-agent plan requires at least two executives"
+        )
+
+    if len(seen) > 4:
+        raise ValueError(
+            "organization plan exceeds executive limit"
+        )
+
+    return resolved
+
+
+@app.post(
+    "/v1/orchestrations/plan"
+)
+async def organization_plan(
+    request: OrganizationPlanRequest,
+):
+    try:
+        batches = resolve_organization_plan(
+            request
+        )
+
+        return {
+            "task_id":
+                request.task_id,
+            "orchestration":
+                "langgraph",
+            "batches":
+                batches,
+        }
+
+    except Exception as exc:
+        raise HTTPException(
+            status_code=422,
             detail=str(exc),
         ) from exc

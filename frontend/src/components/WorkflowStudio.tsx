@@ -41,6 +41,7 @@ type TaskCard = {
 
 type TaskRecord = TaskCard & {
   company_id: number
+  executives?: string[]
   objective: string
   context?: string | null
   constraints: string[]
@@ -491,6 +492,53 @@ export default function WorkflowStudio({
     setVoiceListening(false)
 
     if (company) {
+      void fetch(
+        `/api/executives/roster?company_id=${company.id}`,
+        {
+          method: 'GET',
+          credentials: 'same-origin',
+          cache: 'no-store',
+        },
+      )
+        .then(async (response) => {
+          const data =
+            (await response.json()) as {
+              active_executives?: ExecutiveRole[]
+              error?: string
+            }
+
+          if (!response.ok) {
+            throw new Error(
+              data.error ||
+              'Executive roster unavailable',
+            )
+          }
+
+          return data
+        })
+        .then((data) => {
+          if (!active) return
+
+          const next = ROLES.filter(
+            (role) =>
+              data.active_executives?.includes(role),
+          )
+
+          setExecutiveRoles(next)
+
+          try {
+            localStorage.setItem(
+              `flwme:executives:${company.id}`,
+              JSON.stringify(next),
+            )
+          } catch {
+            // Backend roster remains canonical.
+          }
+        })
+        .catch(() => {
+          // Keep local fallback if server roster cannot load.
+        })
+
       fetch(
         `/api/ceo/history?company_id=${company.id}`,
         {
@@ -612,8 +660,6 @@ export default function WorkflowStudio({
     }
   }
 
-  const toggleExecutive = (role: ExecutiveRole) => {
-    
   useEffect(() => {
     let active = true
 
@@ -662,7 +708,8 @@ export default function WorkflowStudio({
     }
   }, [company?.id])
 
-if (!company) return
+  const toggleExecutive = (role: ExecutiveRole) => {
+    if (!company) return
 
     const removing = executiveRoles.includes(role)
 
@@ -683,6 +730,57 @@ if (!company) return
     }
 
     setExecutiveRoles(next)
+
+    void fetch(
+      '/api/executives/roster',
+      {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: {
+          'Content-Type':
+            'application/json',
+        },
+        body: JSON.stringify({
+          company_id: company.id,
+          active_executives: next,
+        }),
+      },
+    )
+      .then(async (response) => {
+        if (response.ok) return
+
+        const data =
+          (await response.json()) as {
+            error?: string
+          }
+
+        throw new Error(
+          data.error ||
+          'Unable to update Executive roster',
+        )
+      })
+      .catch((error) => {
+        setExecutiveRoles(
+          executiveRoles,
+        )
+
+        try {
+          localStorage.setItem(
+            `flwme:executives:${company.id}`,
+            JSON.stringify(
+              executiveRoles,
+            ),
+          )
+        } catch {
+          // Ignore local fallback failure.
+        }
+
+        setTalkNotice(
+          error instanceof Error
+            ? error.message
+            : 'Unable to update Executive roster',
+        )
+      })
   }
 
   const [attachments, setAttachments] =
@@ -1024,9 +1122,10 @@ if (!company) return
                   (task) =>
                     task.status === 'running',
                 )
-                .map(
+                .flatMap(
                   (task) =>
-                    task.assigned_to,
+                    task.executives ??
+                    [task.assigned_to],
                 )
                 .filter(
                   (role):

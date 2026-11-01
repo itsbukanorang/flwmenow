@@ -58,6 +58,153 @@ If no worker execution is needed, requires_worker must be false and
 worker_brief must be null.
 "#;
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum ExecutiveRole {
+    Cto,
+    Coo,
+    Cfo,
+    Cmo,
+}
+
+impl ExecutiveRole {
+    pub(crate) fn code(self) -> &'static str {
+        match self {
+            Self::Cto => "CTO",
+            Self::Coo => "COO",
+            Self::Cfo => "CFO",
+            Self::Cmo => "CMO",
+        }
+    }
+
+    fn title(self) -> &'static str {
+        match self {
+            Self::Cto => "Chief Technology Officer",
+            Self::Coo => "Chief Operating Officer",
+            Self::Cfo => "Chief Financial Officer",
+            Self::Cmo => "Chief Marketing Officer",
+        }
+    }
+
+    fn system_prompt(self) -> &'static str {
+        match self {
+            Self::Cto => CTO_SYSTEM_PROMPT,
+
+            Self::Coo => {
+                r#"
+You are FLWME's Chief Operating Officer.
+
+You receive a typed executive task from the FLWME runtime.
+
+Your responsibility is executive operational reasoning:
+- understand the operational objective;
+- analyze process, capacity, dependencies, execution sequence, and operational risk;
+- use supplied company context and relevant memory;
+- recommend concrete next operational actions;
+- decide whether real worker execution will eventually be required.
+
+Rules:
+- Never claim real work was executed.
+- You do not have worker tools in this stage.
+- You do not delegate tasks yourself.
+- LangGraph owns routing, delegation, retry, and run lifecycle.
+- Never fabricate evidence, outcomes, company facts, or memory.
+- Current task input has higher authority than historical memory.
+- Keep tenant/company context isolated.
+- Core guidance is advisory only.
+- Return exactly one JSON object and no Markdown.
+
+JSON shape:
+{
+  "assessment": "string",
+  "recommendations": ["string"],
+  "risks": ["string"],
+  "requires_worker": true,
+  "worker_brief": "string or null"
+}
+
+If no worker is needed, requires_worker must be false and worker_brief null.
+"#
+            }
+
+            Self::Cfo => {
+                r#"
+You are FLWME's Chief Financial Officer.
+
+You receive a typed executive task from the FLWME runtime.
+
+Your responsibility is executive financial reasoning:
+- understand the financial objective;
+- analyze budget, cost, cash impact, financial constraints, and risk;
+- use supplied company context and relevant memory;
+- distinguish known financial facts from assumptions;
+- recommend concrete next financial actions;
+- decide whether real worker execution will eventually be required.
+
+Rules:
+- Never invent revenue, balances, costs, forecasts, transactions, or financial evidence.
+- Never claim real work was executed.
+- You do not have worker tools in this stage.
+- You do not delegate tasks yourself.
+- LangGraph owns routing, delegation, retry, and run lifecycle.
+- Current task input has higher authority than historical memory.
+- Keep tenant/company context isolated.
+- Core guidance is advisory only.
+- Return exactly one JSON object and no Markdown.
+
+JSON shape:
+{
+  "assessment": "string",
+  "recommendations": ["string"],
+  "risks": ["string"],
+  "requires_worker": true,
+  "worker_brief": "string or null"
+}
+
+If no worker is needed, requires_worker must be false and worker_brief null.
+"#
+            }
+
+            Self::Cmo => {
+                r#"
+You are FLWME's Chief Marketing Officer.
+
+You receive a typed executive task from the FLWME runtime.
+
+Your responsibility is executive marketing reasoning:
+- understand the marketing objective;
+- analyze positioning, audience, channel, campaign, growth, and brand considerations;
+- use supplied company context and relevant memory;
+- distinguish known market facts from assumptions;
+- recommend concrete next marketing actions;
+- decide whether real worker execution will eventually be required.
+
+Rules:
+- Never fabricate market research, campaign results, customer data, or evidence.
+- Never claim real work was executed.
+- You do not have worker tools in this stage.
+- You do not delegate tasks yourself.
+- LangGraph owns routing, delegation, retry, and run lifecycle.
+- Current task input has higher authority than historical memory.
+- Keep tenant/company context isolated.
+- Core guidance is advisory only.
+- Return exactly one JSON object and no Markdown.
+
+JSON shape:
+{
+  "assessment": "string",
+  "recommendations": ["string"],
+  "risks": ["string"],
+  "requires_worker": true,
+  "worker_brief": "string or null"
+}
+
+If no worker is needed, requires_worker must be false and worker_brief null.
+"#
+            }
+        }
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub(crate) struct ExecutiveTask {
     pub(crate) objective: String,
@@ -70,7 +217,7 @@ pub(crate) struct ExecutiveTask {
 }
 
 #[derive(Debug, Deserialize)]
-pub struct CtoRunInput {
+pub struct ExecutiveRunInput {
     company_id: i64,
     task: ExecutiveTask,
 }
@@ -82,15 +229,6 @@ struct CtoResult {
     risks: Vec<String>,
     requires_worker: bool,
     worker_brief: Option<String>,
-}
-
-#[derive(Serialize)]
-struct CtoRunOutput {
-    executive: &'static str,
-    role: &'static str,
-    model: String,
-    memory_items_used: usize,
-    result: CtoResult,
 }
 
 #[derive(Serialize)]
@@ -436,8 +574,9 @@ fn format_core_guidance_prompt(guidance: &[CoreGuidance]) -> String {
     )
 }
 
-pub(crate) async fn execute_cto_for_user(
+pub(crate) async fn execute_executive_for_user(
     state: &AppState,
+    role: ExecutiveRole,
     company_id: i64,
     user_id: i64,
     task: &ExecutiveTask,
@@ -480,7 +619,7 @@ pub(crate) async fn execute_cto_for_user(
     // Core recall is intentionally best-effort:
     // an unavailable Core service must not block
     // executive execution.
-    let core_guidance = recall_core_guidance(state, &task.objective, "CTO").await;
+    let core_guidance = recall_core_guidance(state, &task.objective, role.code()).await;
 
     let core_guidance_prompt = format_core_guidance_prompt(&core_guidance);
 
@@ -512,7 +651,7 @@ pub(crate) async fn execute_cto_for_user(
         json!({
             "role": "system",
             "content":
-                CTO_SYSTEM_PROMPT,
+                role.system_prompt(),
         }),
         json!({
             "role": "developer",
@@ -577,27 +716,19 @@ pub(crate) async fn execute_cto_for_user(
         .ok_or_else(|| "Executive returned invalid structured result".to_string())?;
 
     Ok(json!({
-        "executive":
-            "CTO",
-        "role":
-            "Chief Technology Officer",
-        "model":
-            model.unwrap_or_else(
-                ||
-                    BASETEN_MODEL
-                        .to_string()
-            ),
-        "memory_items_used":
-            memories.len(),
-        "result":
-            result,
+        "executive": role.code(),
+        "role": role.title(),
+        "model": model.unwrap_or_else(|| BASETEN_MODEL.to_string()),
+        "memory_items_used": memories.len(),
+        "result": result,
     }))
 }
 
-pub async fn run_cto(
-    State(state): State<AppState>,
+async fn run_executive(
+    state: AppState,
     headers: HeaderMap,
-    Json(input): Json<CtoRunInput>,
+    input: ExecutiveRunInput,
+    role: ExecutiveRole,
 ) -> Response {
     if !security::valid_origin(&headers) {
         return error(StatusCode::FORBIDDEN, "Invalid origin");
@@ -623,212 +754,60 @@ pub async fn run_cto(
         }
     };
 
-    let (company_name, company_status) =
-        match company_context(&state, input.company_id, user_id).await {
-            Ok(Some(value)) => value,
+    match execute_executive_for_user(&state, role, input.company_id, user_id, &input.task).await {
+        Ok(output) => json_response(StatusCode::OK, output),
 
-            Ok(None) => {
-                return error(StatusCode::NOT_FOUND, "Company not found");
-            }
+        Err(message) => {
+            let status = match message.as_str() {
+                "Company not found" => StatusCode::NOT_FOUND,
 
-            Err(_) => {
-                return error(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "Company context unavailable",
-                );
-            }
-        };
+                "Company context unavailable"
+                | "Executive memory unavailable"
+                | "Executive provider unavailable" => StatusCode::SERVICE_UNAVAILABLE,
 
-    let mut recall_query = input.task.objective.clone();
+                "Executive provider request failed"
+                | "Executive provider returned invalid response"
+                | "Executive returned no answer"
+                | "Executive returned invalid structured result" => StatusCode::BAD_GATEWAY,
 
-    if let Some(context) = input.task.context.as_deref() {
-        recall_query.push('\n');
-        recall_query.push_str(context);
+                _ => StatusCode::BAD_REQUEST,
+            };
+
+            error(status, &message)
+        }
     }
+}
 
-    let memories =
-        match recall_company_memory(&state, input.company_id, user_id, &recall_query).await {
-            Ok(value) => value,
+pub async fn run_cto(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(input): Json<ExecutiveRunInput>,
+) -> Response {
+    run_executive(state, headers, input, ExecutiveRole::Cto).await
+}
 
-            Err(_) => {
-                return error(
-                    StatusCode::SERVICE_UNAVAILABLE,
-                    "Executive memory unavailable",
-                );
-            }
-        };
+pub async fn run_coo(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(input): Json<ExecutiveRunInput>,
+) -> Response {
+    run_executive(state, headers, input, ExecutiveRole::Coo).await
+}
 
-    let memory_context = if memories.is_empty() {
-        "No relevant company memory was retrieved.".to_string()
-    } else {
-        memories
-            .iter()
-            .enumerate()
-            .map(|(index, item)| format!("{}. [{}]\n{}", index + 1, item.kind, item.content,))
-            .collect::<Vec<_>>()
-            .join("\n\n")
-    };
+pub async fn run_cfo(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(input): Json<ExecutiveRunInput>,
+) -> Response {
+    run_executive(state, headers, input, ExecutiveRole::Cfo).await
+}
 
-    // Separate tenant-neutral Core behavioral
-    // guidance from private company memory.
-    let core_guidance = recall_core_guidance(&state, &input.task.objective, "CTO").await;
-
-    let core_guidance_prompt = format_core_guidance_prompt(&core_guidance);
-
-    let baseten_key = match std::env::var("BASETEN_API_KEY") {
-        Ok(value) if !value.trim().is_empty() => value,
-
-        _ => {
-            return error(
-                StatusCode::SERVICE_UNAVAILABLE,
-                "Executive provider unavailable",
-            );
-        }
-    };
-
-    let company_prompt = format!(
-        "COMPANY CONTEXT\n\
-         Name: {company_name}\n\
-         Status: {company_status}\n\n\
-         This context belongs only to this company. \
-         Never mix it with another tenant."
-    );
-
-    let memory_prompt = format!(
-        "RELEVANT COMPANY MEMORY\n\
-         {memory_context}\n\n\
-         Treat CURRENT memory state as authoritative historical context, \
-         but the current typed task has higher authority if it explicitly \
-         changes or corrects an older value."
-    );
-
-    let task_json = match serde_json::to_string(&input.task) {
-        Ok(value) => value,
-
-        Err(_) => {
-            return error(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Unable to encode executive task",
-            );
-        }
-    };
-
-    let messages: Vec<Value> = vec![
-        json!({
-            "role": "system",
-            "content": CTO_SYSTEM_PROMPT,
-        }),
-        json!({
-            "role": "developer",
-            "content": company_prompt,
-        }),
-        json!({
-            "role": "developer",
-            "content": memory_prompt,
-        }),
-        json!({
-            "role": "developer",
-            "content": core_guidance_prompt,
-        }),
-        json!({
-            "role": "user",
-            "content": format!(
-                "TYPED EXECUTIVE TASK\n{}",
-                task_json,
-            ),
-        }),
-    ];
-
-    let payload = json!({
-        "model": BASETEN_MODEL,
-        "messages": messages,
-    });
-
-    let provider_response = match state
-        .http
-        .post(BASETEN_CHAT_URL)
-        .bearer_auth(baseten_key)
-        .json(&payload)
-        .timeout(Duration::from_secs(120))
-        .send()
-        .await
-    {
-        Ok(response) => response,
-
-        Err(err) => {
-            eprintln!(
-                "CTO_PROVIDER_REQUEST_FAILED kind={}",
-                if err.is_timeout() {
-                    "timeout"
-                } else {
-                    "network"
-                }
-            );
-
-            return error(StatusCode::BAD_GATEWAY, "Executive provider request failed");
-        }
-    };
-
-    let provider_status = provider_response.status();
-
-    let body = match provider_response.bytes().await {
-        Ok(value) => value,
-
-        Err(_) => {
-            return error(
-                StatusCode::BAD_GATEWAY,
-                "Executive provider response failed",
-            );
-        }
-    };
-
-    if !provider_status.is_success() {
-        eprintln!(
-            "CTO_PROVIDER_HTTP_ERROR status={}",
-            provider_status.as_u16(),
-        );
-
-        return error(StatusCode::BAD_GATEWAY, "Executive provider unavailable");
-    }
-
-    let parsed: BasetenResponse = match serde_json::from_slice(&body) {
-        Ok(value) => value,
-
-        Err(_) => {
-            return error(
-                StatusCode::BAD_GATEWAY,
-                "Executive provider returned invalid response",
-            );
-        }
-    };
-
-    let BasetenResponse { model, choices } = parsed;
-
-    let Some(choice) = choices.into_iter().next() else {
-        return error(StatusCode::BAD_GATEWAY, "Executive returned no answer");
-    };
-
-    let raw = choice.message.content.unwrap_or_default();
-
-    let Some(result) = parse_cto_result(&raw) else {
-        eprintln!("CTO_STRUCTURED_RESULT_INVALID");
-
-        return error(
-            StatusCode::BAD_GATEWAY,
-            "Executive returned invalid structured result",
-        );
-    };
-
-    json_response(
-        StatusCode::OK,
-        CtoRunOutput {
-            executive: "CTO",
-            role: "Chief Technology Officer",
-            model: model.unwrap_or_else(|| BASETEN_MODEL.to_string()),
-            memory_items_used: memories.len(),
-            result,
-        },
-    )
+pub async fn run_cmo(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(input): Json<ExecutiveRunInput>,
+) -> Response {
+    run_executive(state, headers, input, ExecutiveRole::Cmo).await
 }
 
 #[cfg(test)]

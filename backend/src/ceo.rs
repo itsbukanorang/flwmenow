@@ -66,43 +66,80 @@ Rules:
 "#;
 
 const CEO_ACTION_PROTOCOL: &str = r#"
-For this turn you must make the CEO's organizational decision.
+For this turn make the CEO's organizational decision.
 
 Return exactly ONE JSON object and no Markdown.
 
-If the CEO should answer directly:
+DIRECT RESPONSE:
 
 {
   "action": "respond",
   "reply": "natural user-facing answer",
   "executive": null,
+  "executive_batches": null,
   "task": null
 }
 
-If this task should be delegated to the CTO:
+SINGLE EXECUTIVE:
 
 {
   "action": "delegate_task",
   "reply": null,
   "executive": "CTO",
+  "executive_batches": null,
   "task": {
-    "objective": "clear technical objective",
+    "objective": "clear objective",
     "context": "relevant context or null",
     "constraints": ["constraint"]
   }
 }
 
-Decision rules:
-- Delegate to CTO when the user asks the organization to perform substantial
-  technical analysis, architecture planning, engineering decisions,
-  implementation planning, infrastructure reasoning, software/system design,
-  or another task appropriate for a Chief Technology Officer.
-- Do not delegate ordinary conversation, simple factual answers,
-  memory questions, greetings, or matters the CEO can answer directly.
-- Do not delegate based on keywords alone. Judge the actual intent.
-- Only CTO exists in the delegation runtime at this API-04 stage.
-- Do not invent another executive.
-- The delegated task must preserve the user's intent and constraints.
+MULTI-EXECUTIVE ORGANIZATION TASK:
+
+{
+  "action": "delegate_organization",
+  "reply": null,
+  "executive": null,
+  "executive_batches": [
+    ["CFO", "CMO"],
+    ["COO"]
+  ],
+  "task": {
+    "objective": "clear organization objective",
+    "context": "relevant context or null",
+    "constraints": ["constraint"]
+  }
+}
+
+EXECUTIVE SPECIALTIES:
+
+CTO = engineering, software, architecture,
+infrastructure, security, technical decisions.
+
+COO = operations, workflows, delivery,
+capacity, execution planning and process.
+
+CFO = finance, budget, cost, cash,
+unit economics, financial planning and risk.
+
+CMO = marketing, positioning, audience,
+campaigns, acquisition, growth and brand.
+
+ORCHESTRATION RULES:
+
+- Use only executives listed in ACTIVE EXECUTIVE ROSTER.
+- Never select an inactive executive.
+- If one executive clearly owns the task, use delegate_task.
+- If multiple domains are genuinely required, use delegate_organization.
+- Executives inside the SAME batch may execute in parallel.
+- A later batch depends on completion of all earlier batches.
+- Put dependent work in a later batch.
+- Never include the same executive more than once.
+- A multi-executive plan must contain at least two executives.
+- Do not delegate normal conversation or simple factual answers.
+- Never fabricate completed work or execution.
+- Preserve user intent and constraints.
+- LangGraph is the final orchestration authority and validates the plan.
 "#;
 
 #[derive(Debug, Deserialize)]
@@ -114,6 +151,9 @@ struct CeoAction {
 
     #[serde(default)]
     executive: Option<String>,
+
+    #[serde(default)]
+    executive_batches: Option<Vec<Vec<String>>>,
 
     #[serde(default)]
     task: Option<CeoDelegatedTask>,
@@ -286,6 +326,53 @@ fn parse_ceo_action(raw: &str) -> Option<CeoAction> {
     parse(&raw[start..=end])
 }
 
+fn validate_executive_batches(
+    batches: &[Vec<String>],
+    active_executives: &[String],
+) -> Result<Vec<Vec<String>>, &'static str> {
+    if batches.is_empty() {
+        return Err("Organization plan requires batches");
+    }
+
+    let supported = ["CTO", "COO", "CFO", "CMO"];
+
+    let mut seen = std::collections::HashSet::new();
+
+    let mut count = 0usize;
+
+    for batch in batches {
+        if batch.is_empty() {
+            return Err("Organization batch cannot be empty");
+        }
+
+        for executive in batch {
+            if !supported.contains(&executive.as_str()) {
+                return Err("Organization plan contains unsupported executive");
+            }
+
+            if !active_executives.iter().any(|value| value == executive) {
+                return Err("Organization plan contains inactive executive");
+            }
+
+            if !seen.insert(executive.as_str()) {
+                return Err("Executive appears more than once");
+            }
+
+            count += 1;
+        }
+    }
+
+    if count < 2 {
+        return Err("Multi-agent plan requires at least two executives");
+    }
+
+    if count > 4 {
+        return Err("Organization plan exceeds executive limit");
+    }
+
+    Ok(batches.to_vec())
+}
+
 fn make_task_id() -> String {
     let mut bytes = [0u8; 8];
 
@@ -350,6 +437,42 @@ async fn company_name(
         .await
         .map(|row| row.map(|value| value.get::<_, String>(0)))
         .map_err(|_| ())
+}
+
+async fn active_executives(
+    state: &AppState,
+    company_id: i64,
+    user_id: i64,
+) -> Result<Vec<String>, ()> {
+    let rows = state
+        .db
+        .query(
+            r#"
+            SELECT r.executive
+            FROM company_executive_roster r
+            JOIN companies c
+              ON c.id = r.company_id
+            WHERE r.company_id = $1
+              AND c.owner_user_id = $2
+              AND r.active = TRUE
+            ORDER BY
+                CASE r.executive
+                    WHEN 'CTO' THEN 1
+                    WHEN 'CFO' THEN 2
+                    WHEN 'CMO' THEN 3
+                    WHEN 'COO' THEN 4
+                    ELSE 99
+                END
+            "#,
+            &[&company_id, &user_id],
+        )
+        .await
+        .map_err(|_| ())?;
+
+    Ok(rows
+        .into_iter()
+        .map(|row| row.get::<_, String>(0))
+        .collect())
 }
 
 async fn active_thread_id(state: &AppState, company_id: i64, user_id: i64) -> Result<i64, ()> {
@@ -747,6 +870,17 @@ pub async fn chat(
         }
     };
 
+    let active_executives = match active_executives(&state, input.company_id, user_id).await {
+        Ok(value) => value,
+
+        Err(_) => {
+            return error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Executive roster unavailable",
+            );
+        }
+    };
+
     let thread_id = match active_thread_id(&state, input.company_id, user_id).await {
         Ok(id) => id,
 
@@ -996,6 +1130,22 @@ pub async fn chat(
         }
     };
 
+    let executive_roster_prompt = if active_executives.is_empty() {
+        "ACTIVE EXECUTIVE ROSTER\n\
+             No executives are currently active for this company.\n\
+             You MUST NOT delegate an executive task. \
+             Either respond directly or explain that an appropriate \
+             executive needs to be activated."
+            .to_string()
+    } else {
+        format!(
+            "ACTIVE EXECUTIVE ROSTER\n{}\n\n\
+                 Only these executives are currently available. \
+                 Never delegate to an executive not listed here.",
+            active_executives.join(", "),
+        )
+    };
+
     let company_context = format!(
         "Current company: {company}. \
              This context belongs only to this company and must never be mixed with another tenant."
@@ -1020,6 +1170,11 @@ pub async fn chat(
         json!({
             "role": "developer",
             "content": core_guidance_prompt,
+        }),
+        json!({
+            "role": "developer",
+            "content":
+                executive_roster_prompt
         }),
         json!({
             "role": "developer",
@@ -1152,11 +1307,22 @@ pub async fn chat(
         },
 
         "delegate_task" => {
-            if decision.executive.as_deref() != Some("CTO") {
-                return error(
-                    StatusCode::BAD_GATEWAY,
-                    "CEO selected unsupported executive",
-                );
+            let executive = match decision.executive.as_deref() {
+                Some("CTO") => "CTO",
+                Some("COO") => "COO",
+                Some("CFO") => "CFO",
+                Some("CMO") => "CMO",
+
+                _ => {
+                    return error(
+                        StatusCode::BAD_GATEWAY,
+                        "CEO selected unsupported executive",
+                    );
+                }
+            };
+
+            if !active_executives.iter().any(|value| value == executive) {
+                return error(StatusCode::BAD_GATEWAY, "CEO selected inactive executive");
             }
 
             let Some(task) = decision.task else {
@@ -1203,11 +1369,11 @@ pub async fn chat(
                                 $3,
                                 $4,
                                 $5,
-                                'CTO',
                                 $6,
                                 $7,
                                 $8,
                                 $9,
+                                $10,
                                 'queued'
                             )
                             RETURNING task_id
@@ -1229,6 +1395,7 @@ pub async fn chat(
                         &user_id,
                         &thread_id,
                         &user_message_id,
+                        &executive,
                         &title,
                         &task.objective,
                         &task.context,
@@ -1245,11 +1412,181 @@ pub async fn chat(
             }
 
             (
-                "I've received your request and delegated it to the CTO.".to_string(),
+                format!(
+                    "I've received your request and delegated it to the {}.",
+                    executive,
+                ),
                 Some(TaskCard {
                     task_id,
                     title,
-                    assigned_to: "CTO".to_string(),
+                    assigned_to: executive.to_string(),
+                    status: "queued".to_string(),
+                }),
+            )
+        }
+
+        "delegate_organization" => {
+            let Some(task) = decision.task else {
+                return error(StatusCode::BAD_GATEWAY, "CEO organization task missing");
+            };
+
+            if task.objective.trim().is_empty() {
+                return error(StatusCode::BAD_GATEWAY, "CEO delegation objective missing");
+            }
+
+            let Some(requested_batches) = decision.executive_batches else {
+                return error(StatusCode::BAD_GATEWAY, "CEO organization plan missing");
+            };
+
+            let batches = match validate_executive_batches(&requested_batches, &active_executives) {
+                Ok(value) => value,
+
+                Err(message) => {
+                    return error(StatusCode::BAD_GATEWAY, message);
+                }
+            };
+
+            let executives = batches.iter().flatten().cloned().collect::<Vec<_>>();
+
+            let task_id = make_task_id();
+
+            let title = task_title(&task.objective);
+
+            let constraints_json = match serde_json::to_string(&task.constraints) {
+                Ok(value) => value,
+
+                Err(_) => {
+                    return error(StatusCode::INTERNAL_SERVER_ERROR, "Unable to encode task");
+                }
+            };
+
+            let active_roster_json = match serde_json::to_string(&active_executives) {
+                Ok(value) => value,
+
+                Err(_) => {
+                    return error(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "Unable to encode executive roster",
+                    );
+                }
+            };
+
+            let batches_json = match serde_json::to_string(&batches) {
+                Ok(value) => value,
+
+                Err(_) => {
+                    return error(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "Unable to encode organization plan",
+                    );
+                }
+            };
+
+            let executives_json = match serde_json::to_string(&executives) {
+                Ok(value) => value,
+
+                Err(_) => {
+                    return error(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "Unable to encode executives",
+                    );
+                }
+            };
+
+            if state
+                .db
+                .execute(
+                    r#"
+                    WITH created AS (
+                        INSERT INTO tasks (
+                            task_id,
+                            company_id,
+                            user_id,
+                            thread_id,
+                            source_message_id,
+                            assigned_to,
+                            title,
+                            objective,
+                            context,
+                            constraints_json,
+                            status
+                        )
+                        VALUES (
+                            $1,
+                            $2,
+                            $3,
+                            $4,
+                            $5,
+                            'ORGANIZATION',
+                            $6,
+                            $7,
+                            $8,
+                            $9,
+                            'queued'
+                        )
+                        RETURNING task_id
+                    ),
+                    orchestration AS (
+                        INSERT INTO task_orchestrations (
+                            task_id,
+                            active_roster_json,
+                            requested_batches_json,
+                            executives_json,
+                            status
+                        )
+                        SELECT
+                            task_id,
+                            ($10::text)::jsonb,
+                            ($11::text)::jsonb,
+                            ($12::text)::jsonb,
+                            'planned'
+                        FROM created
+                        RETURNING task_id
+                    )
+                    INSERT INTO task_events (
+                        task_id,
+                        event_type,
+                        detail
+                    )
+                    SELECT
+                        task_id,
+                        'queued',
+                        'Organization task delegated by CEO'
+                    FROM orchestration
+                    "#,
+                    &[
+                        &task_id,
+                        &input.company_id,
+                        &user_id,
+                        &thread_id,
+                        &user_message_id,
+                        &title,
+                        &task.objective,
+                        &task.context,
+                        &constraints_json,
+                        &active_roster_json,
+                        &batches_json,
+                        &executives_json,
+                    ],
+                )
+                .await
+                .is_err()
+            {
+                return error(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Unable to queue organization task",
+                );
+            }
+
+            (
+                format!(
+                    "I've delegated this to {} executives as one coordinated organization task.",
+                    executives.len(),
+                ),
+                Some(TaskCard {
+                    task_id,
+                    title,
+                    assigned_to: "ORGANIZATION".to_string(),
                     status: "queued".to_string(),
                 }),
             )
@@ -1325,6 +1662,31 @@ pub async fn chat(
 #[cfg(test)]
 mod delegation_tests {
     use super::*;
+
+    #[test]
+    fn validates_multi_agent_batches() {
+        let active = vec![
+            "CTO".to_string(),
+            "COO".to_string(),
+            "CFO".to_string(),
+            "CMO".to_string(),
+        ];
+
+        let valid = vec![
+            vec!["CFO".to_string(), "CMO".to_string()],
+            vec!["COO".to_string()],
+        ];
+
+        assert!(validate_executive_batches(&valid, &active,).is_ok());
+
+        let duplicate = vec![vec!["CTO".to_string()], vec!["CTO".to_string()]];
+
+        assert!(validate_executive_batches(&duplicate, &active,).is_err());
+
+        let inactive = vec![vec!["CTO".to_string(), "CMO".to_string()]];
+
+        assert!(validate_executive_batches(&inactive, &["CTO".to_string()],).is_err());
+    }
 
     #[test]
     fn parses_direct_response() {
